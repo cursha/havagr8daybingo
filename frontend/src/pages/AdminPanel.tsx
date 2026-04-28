@@ -1,0 +1,701 @@
+import React, { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  DeedItem,
+  PendingDeed,
+  adminVerify,
+  getAdminConfig,
+  updateAdminConfig,
+  getAdminDeeds,
+  createAdminDeed,
+  updateAdminDeed,
+  deleteAdminDeed,
+  getAdminPendingDeeds,
+  approvePendingDeed,
+  rejectPendingDeed,
+  deletePendingDeed,
+} from '@/lib/game-utils';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { toast } from 'sonner';
+import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload } from 'lucide-react';
+
+const WIN_CONDITIONS = [
+  { id: 'one_line', name: 'One Line', description: 'Complete 5 in a row (horizontal, vertical, or diagonal)' },
+  { id: 'two_lines', name: 'Two Lines', description: 'Complete any two full lines' },
+  { id: 'four_corners', name: 'Four Corners', description: 'Complete all four corner squares' },
+  { id: 'x_pattern', name: 'X Pattern', description: 'Complete both diagonals forming an X across the card' },
+  { id: 'around_the_edges', name: 'Around the Edges', description: 'Complete all 16 perimeter squares around the card' },
+  { id: 'fill_card', name: 'Fill the Card', description: 'Complete every square on the entire card' },
+];
+
+const AdminPanel: React.FC = () => {
+  const navigate = useNavigate();
+  const [authenticated, setAuthenticated] = useState(false);
+  const [password, setPassword] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+
+  // Config state
+  const [configs, setConfigs] = useState<Record<string, { value: string; description: string }>>({});
+  const [editConfigs, setEditConfigs] = useState<Record<string, string>>({});
+
+  // Deeds state
+  const [deeds, setDeeds] = useState<DeedItem[]>([]);
+  const [newDeed, setNewDeed] = useState({ deed_text: '', deed_text_long: '', category: '' });
+  const [editingDeed, setEditingDeed] = useState<number | null>(null);
+  const [editDeedData, setEditDeedData] = useState({ deed_text: '', deed_text_long: '', category: '' });
+
+  // Pending deed suggestions state
+  const [pendingDeeds, setPendingDeeds] = useState<PendingDeed[]>([]);
+  const [pendingFilter, setPendingFilter] = useState<'pending' | 'approved' | 'rejected' | 'all'>('pending');
+
+  const handleLogin = async () => {
+    setAuthLoading(true);
+    try {
+      await adminVerify(password);
+      setAuthenticated(true);
+      toast.success('Admin access granted');
+    } catch {
+      toast.error('Invalid password');
+    } finally {
+      setAuthLoading(false);
+    }
+  };
+
+  const loadData = async () => {
+    try {
+      const [configData, deedsData] = await Promise.all([getAdminConfig(), getAdminDeeds()]);
+      setConfigs(configData.configs || {});
+      const initial: Record<string, string> = {};
+      Object.entries(configData.configs || {}).forEach(([key, val]: [string, any]) => {
+        initial[key] = val.value;
+      });
+      // Ensure win_condition has a default
+      if (!initial['win_condition']) {
+        initial['win_condition'] = 'one_line';
+      }
+      // Ensure signup_bonus_amount has a default
+      if (initial['signup_bonus_amount'] === undefined || initial['signup_bonus_amount'] === '') {
+        initial['signup_bonus_amount'] = '15';
+      }
+      setEditConfigs(initial);
+      setDeeds(deedsData.deeds || []);
+    } catch (err: any) {
+      toast.error('Failed to load admin data');
+    }
+  };
+
+  const loadPendingDeeds = async (filter: 'pending' | 'approved' | 'rejected' | 'all' = pendingFilter) => {
+    try {
+      const res = await getAdminPendingDeeds(filter);
+      setPendingDeeds(res.pending_deeds || []);
+    } catch {
+      toast.error('Failed to load Gr8Day Deed suggestions');
+    }
+  };
+
+  useEffect(() => {
+    if (authenticated) {
+      loadData();
+      loadPendingDeeds('pending');
+    }
+  }, [authenticated]);
+
+  useEffect(() => {
+    if (authenticated) {
+      loadPendingDeeds(pendingFilter);
+    }
+  }, [pendingFilter]);
+
+  const handleApprove = async (id: number) => {
+    try {
+      await approvePendingDeed(id);
+      toast.success('Gr8Day Deed approved and added to the active pool!');
+      await Promise.all([loadPendingDeeds(pendingFilter), loadData()]);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to approve suggestion');
+    }
+  };
+
+  const handleReject = async (id: number) => {
+    try {
+      await rejectPendingDeed(id);
+      toast.success('Suggestion rejected');
+      await loadPendingDeeds(pendingFilter);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to reject suggestion');
+    }
+  };
+
+  const handleDeletePending = async (id: number) => {
+    try {
+      await deletePendingDeed(id);
+      toast.success('Suggestion removed');
+      await loadPendingDeeds(pendingFilter);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete suggestion');
+    }
+  };
+
+  const handleSaveConfig = async () => {
+    try {
+      await updateAdminConfig(editConfigs);
+      toast.success('Configuration saved!');
+      await loadData();
+    } catch {
+      toast.error('Failed to save config');
+    }
+  };
+
+  const handleAddDeed = async () => {
+    if (!newDeed.deed_text.trim()) {
+      toast.error('Gr8Day Deed text is required');
+      return;
+    }
+    try {
+      await createAdminDeed({
+        deed_text: newDeed.deed_text.trim(),
+        deed_text_long: newDeed.deed_text_long.trim() || undefined,
+        category: newDeed.category.trim(),
+        is_active: true,
+      });
+      setNewDeed({ deed_text: '', deed_text_long: '', category: '' });
+      toast.success('Gr8Day Deed added!');
+      await loadData();
+    } catch {
+      toast.error('Failed to add Gr8Day Deed');
+    }
+  };
+
+  const handleUpdateDeed = async (id: number) => {
+    try {
+      await updateAdminDeed(id, editDeedData);
+      setEditingDeed(null);
+      toast.success('Gr8Day Deed updated!');
+      await loadData();
+    } catch {
+      toast.error('Failed to update Gr8Day Deed');
+    }
+  };
+
+  const handleDeleteDeed = async (id: number) => {
+    try {
+      await deleteAdminDeed(id);
+      toast.success('Gr8Day Deed deleted');
+      await loadData();
+    } catch {
+      toast.error('Failed to delete Gr8Day Deed');
+    }
+  };
+
+  const handleToggleActive = async (deed: DeedItem) => {
+    try {
+      await updateAdminDeed(deed.id, { is_active: !deed.is_active });
+      toast.success(deed.is_active ? 'Gr8Day Deed deactivated' : 'Gr8Day Deed activated');
+      await loadData();
+    } catch {
+      toast.error('Failed to toggle Gr8Day Deed');
+    }
+  };
+
+  if (!authenticated) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Card className="w-full max-w-sm mx-4">
+          <CardHeader className="text-center">
+            <div className="flex justify-center mb-2">
+              <div className="bg-indigo-100 rounded-full p-3">
+                <Lock className="w-6 h-6 text-indigo-600" />
+              </div>
+            </div>
+            <CardTitle>Gr8Day Admin Access</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <Input
+              type="password"
+              placeholder="Enter admin password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+            />
+            <Button
+              className="w-full bg-indigo-600 hover:bg-indigo-700 text-white"
+              onClick={handleLogin}
+              disabled={authLoading}
+            >
+              {authLoading ? 'Verifying...' : 'Login'}
+            </Button>
+            <Button variant="ghost" className="w-full" onClick={() => navigate('/')}>
+              <ArrowLeft className="w-4 h-4 mr-1" /> Back to Home
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const configFields = [
+    { key: 'signup_bonus_amount', label: 'Signup Bonus Amount ($)', type: 'number' },
+    { key: 'dollar1_pct', label: '$0.50 Square Percentage', type: 'number' },
+    { key: 'dollar2_pct', label: '$1.00 Square Percentage', type: 'number' },
+    { key: 'dollar5_pct', label: '$2.00 Square Percentage', type: 'number' },
+    { key: 'secret_reward_1_pct', label: 'Secret Square: $1 Reward %', type: 'number' },
+    { key: 'secret_reward_2_pct', label: 'Secret Square: $2 Reward %', type: 'number' },
+    { key: 'secret_reward_5_pct', label: 'Secret Square: $5 Reward %', type: 'number' },
+  ];
+
+  const prizeImageUrl = editConfigs['prize_image_url'] || '';
+  const prizeTitle = editConfigs['prize_title'] || '';
+
+  const currentWinCondition = editConfigs['win_condition'] || 'one_line';
+  const selectedWC = WIN_CONDITIONS.find((wc) => wc.id === currentWinCondition);
+
+  return (
+    <div className="min-h-screen bg-slate-50">
+      {/* Header */}
+      <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-40">
+        <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/')}>
+            <ArrowLeft className="w-5 h-5" />
+          </Button>
+          <Heart className="w-6 h-6 text-indigo-600 fill-indigo-600" />
+          <span className="text-lg font-bold text-slate-800">Gr8Day Admin Panel</span>
+        </div>
+      </header>
+
+      <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Game Mode Selection */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-violet-500" />
+              Game Mode
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Choose the active game mode for all players. This determines the win condition for everyone's bingo card.
+            </p>
+            <Select
+              value={currentWinCondition}
+              onValueChange={(value) =>
+                setEditConfigs((prev) => ({ ...prev, win_condition: value }))
+              }
+            >
+              <SelectTrigger className="w-full max-w-xs">
+                <SelectValue placeholder="Select game mode" />
+              </SelectTrigger>
+              <SelectContent>
+                {WIN_CONDITIONS.map((wc) => (
+                  <SelectItem key={wc.id} value={wc.id}>
+                    {wc.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {selectedWC && (
+              <div className="bg-violet-50 border border-violet-200 rounded-lg p-3 text-sm text-violet-700">
+                <strong>{selectedWC.name}:</strong> {selectedWC.description}
+              </div>
+            )}
+            <Button onClick={handleSaveConfig} className="bg-violet-600 hover:bg-violet-700 text-white">
+              <Save className="w-4 h-4 mr-1" /> Save Game Mode
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Prize Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Gift className="w-5 h-5 text-rose-500" />
+              Prize
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Showcase this game's prize on the homepage and game board. Paste a direct image URL (PNG/JPG/WebP). Recommended size around 800×600.
+            </p>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-1 block">Prize Title</label>
+              <Input
+                type="text"
+                placeholder="e.g. This Week's Prize: $100 Amazon Gift Card"
+                value={prizeTitle}
+                onChange={(e) =>
+                  setEditConfigs((prev) => ({ ...prev, prize_title: e.target.value }))
+                }
+              />
+            </div>
+
+            <div>
+              <label className="text-sm font-medium text-slate-700 mb-1 block">Prize Image URL</label>
+              <div className="flex gap-2">
+                <Input
+                  type="url"
+                  placeholder="https://example.com/prize.png"
+                  value={prizeImageUrl}
+                  onChange={(e) =>
+                    setEditConfigs((prev) => ({ ...prev, prize_image_url: e.target.value }))
+                  }
+                  className="flex-1"
+                />
+                {prizeImageUrl && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setEditConfigs((prev) => ({ ...prev, prize_image_url: '' }))}
+                    title="Clear"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
+              <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
+                <Upload className="w-3 h-3" /> Host your image anywhere (e.g. Imgur, Cloudinary, S3) and paste the direct link here.
+              </p>
+            </div>
+
+            {prizeImageUrl && (
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-4">
+                <p className="text-xs font-medium text-slate-500 mb-2">Preview</p>
+                <div className="flex justify-center">
+                  <img
+                    src={prizeImageUrl}
+                    alt="Prize preview"
+                    className="max-h-48 rounded-lg shadow-md border border-white"
+                    onError={(e) => {
+                      (e.currentTarget as HTMLImageElement).style.opacity = '0.3';
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+
+            <Button onClick={handleSaveConfig} className="bg-rose-600 hover:bg-rose-700 text-white">
+              <Save className="w-4 h-4 mr-1" /> Save Prize
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Game Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Settings className="w-5 h-5 text-indigo-500" />
+              Game Configuration
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="bg-sky-50 border border-sky-200 rounded-lg p-3 text-sm text-sky-700">
+              <strong>Note:</strong> Each player's card now gets a randomized number of <em>purchasable squares</em> (1–3) and <em>referral-free squares</em> (0–2) automatically, so those counts are no longer configurable here.
+            </div>
+            <div className="grid sm:grid-cols-2 gap-4">
+              {configFields.map((field) => (
+                <div key={field.key}>
+                  <label className="text-sm font-medium text-slate-700 mb-1 block">{field.label}</label>
+                  <Input
+                    type={field.type}
+                    value={editConfigs[field.key] || ''}
+                    onChange={(e) =>
+                      setEditConfigs((prev) => ({ ...prev, [field.key]: e.target.value }))
+                    }
+                  />
+                  {configs[field.key]?.description && (
+                    <p className="text-xs text-slate-400 mt-1">{configs[field.key].description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
+              <strong>Note:</strong> $0.50 + $1.00 + $2.00 percentages should add up to 100%. These control the price distribution of purchasable squares.
+            </div>
+            <div className="bg-fuchsia-50 border border-fuchsia-200 rounded-lg p-3 text-sm text-fuchsia-700">
+              <strong>Secret Square:</strong> Every card has one hidden square that secretly awards $1, $2, or $5 to the player's wallet the first time it's marked. The three percentages above should add up to 100%.
+            </div>
+            <Button onClick={handleSaveConfig} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+              <Save className="w-4 h-4 mr-1" /> Save Configuration
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Gr8Day Deed Suggestions (Pending Approval) */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+              <span className="flex items-center gap-2">
+                <Inbox className="w-5 h-5 text-amber-500" />
+                Gr8Day Deed Suggestions ({pendingDeeds.length})
+              </span>
+              <Select value={pendingFilter} onValueChange={(v) => setPendingFilter(v as any)}>
+                <SelectTrigger className="w-36 h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pending">Pending</SelectItem>
+                  <SelectItem value="approved">Approved</SelectItem>
+                  <SelectItem value="rejected">Rejected</SelectItem>
+                  <SelectItem value="all">All</SelectItem>
+                </SelectContent>
+              </Select>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-slate-500 mb-3">
+              Users can suggest new Gr8Day Deeds from the game page. Approve to add them to the active Gr8Day Deed pool,
+              or reject/remove unwanted suggestions.
+            </p>
+            {pendingDeeds.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm flex flex-col items-center gap-2">
+                <Lightbulb className="w-8 h-8 text-slate-300" />
+                No {pendingFilter === 'all' ? '' : pendingFilter} suggestions at the moment.
+              </div>
+            ) : (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[360px] overflow-y-auto divide-y">
+                  {pendingDeeds.map((p) => (
+                    <div key={p.id} className="px-3 py-2.5 text-sm hover:bg-slate-50">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-slate-800 font-medium">{p.deed_text}</p>
+                          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-1 text-xs text-slate-500">
+                            {p.category && (
+                              <span className="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded">
+                                {p.category}
+                              </span>
+                            )}
+                            {p.suggested_by_name && <span>by {p.suggested_by_name}</span>}
+                            {p.created_at && (
+                              <span>{new Date(p.created_at).toLocaleDateString()}</span>
+                            )}
+                            <span
+                              className={`px-2 py-0.5 rounded font-bold ${
+                                p.status === 'approved'
+                                  ? 'bg-emerald-100 text-emerald-700'
+                                  : p.status === 'rejected'
+                                  ? 'bg-rose-100 text-rose-700'
+                                  : 'bg-amber-100 text-amber-700'
+                              }`}
+                            >
+                              {p.status}
+                            </span>
+                          </div>
+                          {p.notes && (
+                            <p className="text-xs text-slate-500 italic mt-1">Note: {p.notes}</p>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          {p.status === 'pending' && (
+                            <>
+                              <Button
+                                size="sm"
+                                onClick={() => handleApprove(p.id)}
+                                className="bg-emerald-600 hover:bg-emerald-700 text-white h-8 px-2"
+                              >
+                                <Check className="w-3.5 h-3.5 mr-1" /> Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => handleReject(p.id)}
+                                className="h-8 px-2 text-rose-600 border-rose-200 hover:bg-rose-50"
+                              >
+                                <XCircle className="w-3.5 h-3.5 mr-1" /> Reject
+                              </Button>
+                            </>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleDeletePending(p.id)}
+                            className="h-8 w-8 p-0"
+                            title="Remove from queue"
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-slate-400 hover:text-rose-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Gr8Day Deeds Table */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Heart className="w-5 h-5 text-rose-500" />
+                Gr8Day Deeds ({deeds.length})
+              </span>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {/* Add new Gr8Day Deed */}
+            <div className="mb-4 space-y-2 border border-slate-200 rounded-lg p-3 bg-slate-50/60">
+              <p className="text-xs font-semibold text-slate-600 uppercase tracking-wide">
+                Add a new Gr8Day Deed
+              </p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Short Gr8Day Deed text (shown on the bingo square)"
+                  value={newDeed.deed_text}
+                  onChange={(e) => setNewDeed((prev) => ({ ...prev, deed_text: e.target.value }))}
+                  className="flex-1"
+                />
+                <Input
+                  placeholder="Category"
+                  value={newDeed.category}
+                  onChange={(e) => setNewDeed((prev) => ({ ...prev, category: e.target.value }))}
+                  className="w-32 sm:w-40"
+                />
+              </div>
+              <Textarea
+                placeholder="Long description (shown when a player hovers the square — optional but recommended)"
+                value={newDeed.deed_text_long}
+                onChange={(e) =>
+                  setNewDeed((prev) => ({ ...prev, deed_text_long: e.target.value }))
+                }
+                className="min-h-[64px] text-sm"
+              />
+              <div className="flex justify-end">
+                <Button
+                  onClick={handleAddDeed}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  <Plus className="w-4 h-4 mr-1" /> Add Gr8Day Deed
+                </Button>
+              </div>
+            </div>
+
+            {/* Gr8Day Deeds list */}
+            <div className="border rounded-lg overflow-hidden">
+              <div className="max-h-[500px] overflow-y-auto divide-y">
+                {deeds.map((deed) => (
+                  <div
+                    key={deed.id}
+                    className={`px-3 py-2.5 text-sm ${
+                      !deed.is_active ? 'bg-slate-50 opacity-60' : 'bg-white'
+                    }`}
+                  >
+                    {editingDeed === deed.id ? (
+                      <div className="space-y-2">
+                        <div className="flex gap-2">
+                          <Input
+                            value={editDeedData.deed_text}
+                            onChange={(e) =>
+                              setEditDeedData((prev) => ({ ...prev, deed_text: e.target.value }))
+                            }
+                            className="flex-1 h-8 text-sm"
+                            placeholder="Short deed text"
+                          />
+                          <Input
+                            value={editDeedData.category}
+                            onChange={(e) =>
+                              setEditDeedData((prev) => ({ ...prev, category: e.target.value }))
+                            }
+                            className="w-28 h-8 text-sm"
+                            placeholder="Category"
+                          />
+                        </div>
+                        <Textarea
+                          value={editDeedData.deed_text_long}
+                          onChange={(e) =>
+                            setEditDeedData((prev) => ({
+                              ...prev,
+                              deed_text_long: e.target.value,
+                            }))
+                          }
+                          placeholder="Long description (shown on hover)"
+                          className="min-h-[60px] text-xs"
+                        />
+                        <div className="flex items-center justify-end gap-1">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleUpdateDeed(deed.id)}
+                          >
+                            <Save className="w-3.5 h-3.5 text-emerald-600 mr-1" />
+                            Save
+                          </Button>
+                          <Button size="sm" variant="ghost" onClick={() => setEditingDeed(null)}>
+                            <X className="w-3.5 h-3.5 mr-1" /> Cancel
+                          </Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start gap-2">
+                        <div className="flex-1 min-w-0">
+                          <p className="text-slate-800 font-medium">{deed.deed_text}</p>
+                          {deed.deed_text_long ? (
+                            <p className="text-xs text-slate-500 mt-0.5 line-clamp-2">
+                              {deed.deed_text_long}
+                            </p>
+                          ) : (
+                            <p className="text-xs text-amber-600 italic mt-0.5">
+                              No long description yet — add one so players see context on hover.
+                            </p>
+                          )}
+                          {deed.category && (
+                            <span className="inline-block mt-1 text-[10px] bg-indigo-50 text-indigo-700 px-1.5 py-0.5 rounded">
+                              {deed.category}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-1 flex-shrink-0">
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleToggleActive(deed)}
+                            className={`h-8 px-2 ${
+                              deed.is_active ? 'text-emerald-600' : 'text-slate-400'
+                            }`}
+                          >
+                            {deed.is_active ? 'Active' : 'Inactive'}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => {
+                              setEditingDeed(deed.id);
+                              setEditDeedData({
+                                deed_text: deed.deed_text,
+                                deed_text_long: deed.deed_text_long || '',
+                                category: deed.category || '',
+                              });
+                            }}
+                          >
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 w-8 p-0"
+                            onClick={() => handleDeleteDeed(deed.id)}
+                          >
+                            <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+};
+
+export default AdminPanel;
