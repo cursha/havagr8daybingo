@@ -12,7 +12,7 @@ A weekly, community-driven bingo game where players complete real-world **Gr8Day
 - **Deeds:** Each non-free cell shows a "Gr8Day Deed" (e.g. *"Donate to a food bank"*, *"Write a kind note to a coworker"*). Players tap a cell to mark a deed complete.
 - **Winning:** The win pattern is set by the admin (One Line, Two Lines, Four Corners, X Pattern, Around the Edges, or Fill the Card).
 - **Monetization & Engagement Hooks:**
-  - **Purchasable Squares ($0.50 / $1 / $2):** A few random squares per card can be unlocked by spending wallet funds.
+  - **Purchasable Squares ($0.50 / $1 / $2):** A few random squares per card can be unlocked by spending wallet funds.Each purchasable square must be paid for separately.
   - **Referral Squares:** Some squares are "Refer a Player" — inviting one friend unlocks ALL referral squares on the card.
   - **Secret Square:** One hidden square per card awards a surprise wallet bonus (+$1, $2, or $5) the first time it's marked.
   - **Signup Bonus:** New players receive a wallet top-up after completing their profile.  The amount is set by a user defined field in the setup table. 
