@@ -1,14 +1,20 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { createAccessToken, getAuthUser, requireAuth } from '../_shared/auth.ts'
 import { getSupabase, getSubPath } from '../_shared/db.ts'
-import * as bcrypt from 'npm:bcryptjs@2'
+import bcrypt from 'npm:bcryptjs@2'
 
 Deno.serve(async (req: Request) => {
   const cors = handleCors(req)
   if (cors) return cors
 
   const url = new URL(req.url)
-  const path = getSubPath(url, 'auth-custom')
+  const rawPath = getSubPath(url, 'auth-custom')
+  const path = rawPath.startsWith('/auth-custom') 
+   ? rawPath.slice('/auth-custom'.length) || '/'
+   : rawPath
+  console.log('DEBUG fixed path:', path)
+  console.log('DEBUG path:', path)
+  console.log('DEBUG url.pathname:', url.pathname)
   const method = req.method
   const supabase = getSupabase()
 

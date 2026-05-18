@@ -56,6 +56,8 @@ async function request<T>(path: string, options: ApiRequestOptions = {}): Promis
   const { body, skipAuth, headers, ...rest } = options;
   const finalHeaders: Record<string, string> = {
     'Content-Type': 'application/json',
+    'apikey': import.meta.env.VITE_SUPABASE_ANON_KEY,
+    'Authorization': `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
     ...(headers as Record<string, string> | undefined),
   };
 
