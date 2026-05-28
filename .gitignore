@@ -1,0 +1,45 @@
+# Environment variables — never commit secrets
+.env
+.env.local
+.env.*.local
+frontend/.env.local
+supabase/.env
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+__pycache__/
+*.pyc
+*.pyo
+
+# Temporary working files
+.tmp/
+supabase/.temp/
+
+# Build artifacts (managed separately)
+# frontend/dist/ is intentionally tracked for deployment
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+*.egg
+
+# Logs
+*.log
+error_log
+
+# npm
+frontend/.npmrc

@@ -15,11 +15,13 @@ export function getSupabase(): SupabaseClient {
  *        /register                            →  /register
  */
 export function getSubPath(url: URL, functionName: string): string {
-  const prefix = `/functions/v1/${functionName}`
+  const longPrefix = `/functions/v1/${functionName}`
+  const shortPrefix = `/${functionName}`
   const raw = url.pathname.endsWith('/')
     ? url.pathname.slice(0, -1)
     : url.pathname
-  if (raw.startsWith(prefix)) return raw.slice(prefix.length) || '/'
+  if (raw.startsWith(longPrefix)) return raw.slice(longPrefix.length) || '/'
+  if (raw.startsWith(shortPrefix)) return raw.slice(shortPrefix.length) || '/'
   return raw || '/'
 }
 
