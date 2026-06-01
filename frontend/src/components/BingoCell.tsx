@@ -35,7 +35,6 @@ const BingoCell: React.FC<BingoCellProps> = ({
   onUnmark,
 }) => {
   const [pendingConfirm, setPendingConfirm] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
   const isCompleted = isCellCompleted(
@@ -48,24 +47,28 @@ const BingoCell: React.FC<BingoCellProps> = ({
   const isPurchased = purchasedCells.includes(cell.index);
   const isReferralFree = referralCells.includes(cell.index);
 
-  // Auto-focus the confirmation input when it appears
-  useEffect(() => {
-    if (pendingConfirm) {
-      const t = setTimeout(() => inputRef.current?.focus(), 30);
-      return () => clearTimeout(t);
-    }
-  }, [pendingConfirm]);
-
-  // Cancel when user clicks outside this cell
+  // Cancel on Escape key
   useEffect(() => {
     if (!pendingConfirm) return;
-    const handler = (e: MouseEvent) => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setPendingConfirm(false); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [pendingConfirm]);
+
+  // Cancel when user clicks/touches outside this cell
+  useEffect(() => {
+    if (!pendingConfirm) return;
+    const handler = (e: MouseEvent | TouchEvent) => {
       if (buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
         setPendingConfirm(false);
       }
     };
     document.addEventListener('mousedown', handler);
-    return () => document.removeEventListener('mousedown', handler);
+    document.addEventListener('touchstart', handler);
+    return () => {
+      document.removeEventListener('mousedown', handler);
+      document.removeEventListener('touchstart', handler);
+    };
   }, [pendingConfirm]);
 
   const qty = cell.quantity ?? 1;
@@ -147,39 +150,36 @@ const BingoCell: React.FC<BingoCellProps> = ({
       {/* ===== CONFIRMATION OVERLAY ===== */}
       {pendingConfirm && (
         <div
-          className="absolute inset-0 z-10 bg-indigo-950/95 flex flex-col items-center justify-center p-1 rounded"
+          className="absolute inset-0 z-10 bg-indigo-950/95 flex flex-col items-center justify-center gap-1.5 p-1 rounded"
+          onMouseDown={(e) => e.stopPropagation()}
           onClick={(e) => e.stopPropagation()}
+          onTouchStart={(e) => e.stopPropagation()}
         >
-          <p className="text-[7px] sm:text-[9px] font-black text-white uppercase tracking-wide text-center leading-tight mb-0.5">
+          <p className="text-[7px] sm:text-[9px] font-black text-white uppercase tracking-wide text-center leading-tight">
             {isCompleted ? 'UNMARK?' : 'MARK SQUARE?'}
           </p>
-          <p className="text-[6px] sm:text-[8px] text-amber-300 text-center mb-1 leading-tight">
-            {isCompleted ? 'Type Y to remove' : 'Type Y to confirm!'}
-          </p>
-          <input
-            ref={inputRef}
-            type="text"
-            className="w-7 sm:w-9 h-5 sm:h-6 text-center text-[9px] sm:text-[11px] font-bold bg-white/20 border border-white/40 rounded text-white outline-none focus:border-amber-400 focus:bg-white/30 placeholder:text-white/40"
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') { setPendingConfirm(false); return; }
-              if (e.key === 'y' || e.key === 'Y') { e.preventDefault(); handleConfirm(); }
-              else if (e.key.length === 1) { e.preventDefault(); }
-            }}
-            placeholder="Y"
-            autoComplete="off"
-          />
-          <button
-            type="button"
-            className="absolute top-0.5 right-0.5 text-white/50 hover:text-white leading-none p-0.5"
-            style={{ fontSize: '10px' }}
-            onMouseDown={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              setPendingConfirm(false);
-            }}
-          >
-            ✕
-          </button>
+          <div className="flex gap-2">
+            <div
+              role="button"
+              tabIndex={0}
+              className="flex items-center justify-center w-9 sm:w-11 h-7 sm:h-8 bg-emerald-500 active:bg-emerald-400 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirm(); }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirm(); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleConfirm(); }}
+            >
+              ✓
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              className="flex items-center justify-center w-9 sm:w-11 h-7 sm:h-8 bg-rose-600/80 active:bg-rose-500 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
+              onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setPendingConfirm(false); }}
+              onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setPendingConfirm(false); }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setPendingConfirm(false); }}
+            >
+              ✕
+            </div>
+          </div>
         </div>
       )}
 
