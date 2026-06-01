@@ -94,6 +94,8 @@ const BingoCell: React.FC<BingoCellProps> = ({
     }
     if (cell.is_purchasable && isPurchased) return;
     if (cell.is_referral_free) return;
+    // Revealed secret squares cannot be unmarked (wallet credit already paid out)
+    if (cell.is_secret && cell.secret_revealed) return;
     setPendingConfirm(true);
   };
 
