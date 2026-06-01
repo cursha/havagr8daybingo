@@ -233,11 +233,15 @@ const BingoCell: React.FC<BingoCellProps> = ({
                 {cell.deed_text}
               </span>
               {qty > 1 && (
-                <div className="flex gap-0.5 mt-0.5">
-                  {Array.from({ length: qty }).map((_, i) => (
-                    <span key={i} className="text-[8px] sm:text-[10px] text-white/80">●</span>
-                  ))}
-                </div>
+                qty <= 6 ? (
+                  <div className="flex gap-0.5 mt-0.5">
+                    {Array.from({ length: qty }).map((_, i) => (
+                      <span key={i} className="text-[8px] sm:text-[10px] text-white/80">●</span>
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-[7px] sm:text-[9px] text-white/80 mt-0.5">Done {qty}×</span>
+                )
               )}
             </>
           )}
@@ -279,14 +283,16 @@ const BingoCell: React.FC<BingoCellProps> = ({
           </span>
           {qty > 1 && (
             <div className="flex flex-col items-center gap-0.5 mt-0.5">
-              <div className="flex gap-0.5">
-                {Array.from({ length: qty }).map((_, i) => (
-                  <span key={i} className={`text-[8px] sm:text-[10px] ${i < progress ? 'text-emerald-500' : 'text-slate-300'}`}>
-                    {i < progress ? '●' : '○'}
-                  </span>
-                ))}
-              </div>
-              <span className="text-[7px] sm:text-[9px] text-slate-400">
+              {qty <= 6 && (
+                <div className="flex gap-0.5">
+                  {Array.from({ length: qty }).map((_, i) => (
+                    <span key={i} className={`text-[8px] sm:text-[10px] ${i < progress ? 'text-emerald-500' : 'text-slate-300'}`}>
+                      {i < progress ? '●' : '○'}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <span className="text-[8px] sm:text-[10px] font-bold text-indigo-600">
                 {progress} / {qty}
               </span>
             </div>

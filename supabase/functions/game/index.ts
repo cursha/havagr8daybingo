@@ -137,13 +137,34 @@ Deno.serve(async (req: Request) => {
           needsSave = true
         }
 
+        const cells: Cell[] = JSON.parse(existing.card_data)
+
+        // Re-sync each cell's quantity from the current good_deeds table so that
+        // when an admin changes a deed's quantity, existing cards pick it up
+        // (card_data is a snapshot taken at generation time).
+        const deedIds = cells.map((c) => c.deed_id).filter((id): id is number => id != null)
+        if (deedIds.length > 0) {
+          const { data: freshDeeds } = await supabase
+            .from('good_deeds').select('id, quantity').in('id', deedIds)
+          const qtyById = new Map<number, number>()
+          for (const d of freshDeeds ?? []) qtyById.set(d.id, d.quantity ?? 1)
+          for (const c of cells) {
+            if (c.deed_id != null && qtyById.has(c.deed_id)) {
+              const freshQty = qtyById.get(c.deed_id)!
+              if (c.quantity !== freshQty) {
+                c.quantity = freshQty
+                needsSave = true
+              }
+            }
+          }
+        }
+
         // Re-sync referral cells
         const { data: validRefs } = await supabase
           .from('referrals')
           .select('id')
           .eq('user_id', user.sub)
           .eq('is_validated', true)
-        const cells: Cell[] = JSON.parse(existing.card_data)
         const allReferralPos = cells.filter((c) => c.is_referral_free).map((c) => c.index)
         const currentReferralCells = parseJsonArr(existing.referral_cells)
         if ((validRefs?.length ?? 0) > 0 &&
@@ -160,6 +181,7 @@ Deno.serve(async (req: Request) => {
           existing.is_bingo = checkBingo(allCompleted, existing.win_condition)
           existing.updated_at = new Date().toISOString()
           await supabase.from('player_cards').update({
+            card_data: JSON.stringify(cells),
             win_condition: existing.win_condition,
             referral_cells: existing.referral_cells,
             is_bingo: existing.is_bingo,
@@ -170,7 +192,7 @@ Deno.serve(async (req: Request) => {
         return jsonResponse({
           card_id: existing.id,
           week_year: existing.week_year,
-          cells: JSON.parse(existing.card_data),
+          cells,
           win_condition: existing.win_condition,
           completed_cells: parseJsonArr(existing.completed_cells),
           purchased_cells: parseJsonArr(existing.purchased_cells),
@@ -646,7 +668,7 @@ Deno.serve(async (req: Request) => {
         category: body.category ?? '',
         is_active: body.is_active ?? true,
         complexity: body.complexity != null ? Number(body.complexity) : null,
-        quantity: body.quantity != null ? Math.min(4, Math.max(1, Math.round(Number(body.quantity)))) : 1,
+        quantity: body.quantity != null ? Math.max(1, Math.round(Number(body.quantity)) || 1) : 1,
       }).select().single()
       if (error) throw error
       return jsonResponse({ id: data.id, deed_text: data.deed_text, deed_text_long: data.deed_text_long, category: data.category, is_active: data.is_active, complexity: data.complexity ?? null, quantity: data.quantity ?? 1 })
@@ -677,7 +699,7 @@ Deno.serve(async (req: Request) => {
       const parseQuantity = (v: unknown): number => {
         const n = Number(v)
         if (!Number.isFinite(n)) return 1
-        return Math.min(4, Math.max(1, Math.round(n)))
+        return Math.max(1, Math.round(n))
       }
 
       for (const row of rows) {
@@ -726,7 +748,7 @@ Deno.serve(async (req: Request) => {
       if ('category' in body) updates.category = body.category
       if ('is_active' in body) updates.is_active = body.is_active
       if ('complexity' in body) updates.complexity = body.complexity != null ? Number(body.complexity) : null
-      if ('quantity' in body) updates.quantity = body.quantity != null ? Math.min(4, Math.max(1, Math.round(Number(body.quantity)))) : 1
+      if ('quantity' in body) updates.quantity = body.quantity != null ? Math.max(1, Math.round(Number(body.quantity)) || 1) : 1
       const { data, error } = await supabase.from('good_deeds')
         .update(updates).eq('id', parseInt(deedPutMatch.id)).select().maybeSingle()
       if (error) throw error

@@ -913,7 +913,7 @@ const AdminPanel: React.FC = () => {
               <p><span className="font-mono bg-white px-1 rounded">id</span> — leave as-is to update existing rows. If blank, we match by <strong>deed_text</strong>: a deed with the same name is updated, not duplicated. A brand-new name creates a new deed.</p>
               <p><span className="font-mono bg-white px-1 rounded">category</span> — e.g. Generosity, Community, Charity</p>
               <p><span className="font-mono bg-white px-1 rounded">complexity</span> — 1=Easy, 3=Medium, 5=Hard (or leave blank)</p>
-              <p><span className="font-mono bg-white px-1 rounded">quantity</span> — how many times the player must do it (1–4). Use 1 for normal deeds, 2–4 for "do it multiple times" deeds.</p>
+              <p><span className="font-mono bg-white px-1 rounded">quantity</span> — how many times the player must do it (1 or more). Use 1 for normal deeds, or 2, 3, 5, 10… for "do it multiple times" deeds.</p>
               <p><span className="font-mono bg-white px-1 rounded">deed_text</span> — short text shown on the bingo square (required)</p>
               <p><span className="font-mono bg-white px-1 rounded">deed_text_long</span> — long description shown on hover (optional)</p>
               <p><span className="font-mono bg-white px-1 rounded">is_active</span> — true or false (TRUE/FALSE in any case works)</p>
@@ -962,17 +962,18 @@ const AdminPanel: React.FC = () => {
                   <option value="4">4</option>
                   <option value="5">5 – Hard</option>
                 </select>
-                <select
-                  value={newDeed.quantity}
-                  onChange={(e) => setNewDeed((prev) => ({ ...prev, quantity: e.target.value }))}
-                  className="w-32 sm:w-36 border border-input rounded-md bg-background px-2 text-sm"
-                  title="How many times the player must do this deed"
-                >
-                  <option value="1">Do it 1× (default)</option>
-                  <option value="2">Do it 2×</option>
-                  <option value="3">Do it 3×</option>
-                  <option value="4">Do it 4×</option>
-                </select>
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-500 whitespace-nowrap">Do it</span>
+                  <Input
+                    type="number"
+                    min={1}
+                    value={newDeed.quantity}
+                    onChange={(e) => setNewDeed((prev) => ({ ...prev, quantity: e.target.value }))}
+                    className="w-16"
+                    title="How many times the player must do this deed"
+                  />
+                  <span className="text-xs text-slate-500">×</span>
+                </div>
               </div>
               <Textarea
                 placeholder="Long description (shown when a player hovers the square — optional but recommended)"
@@ -1033,17 +1034,18 @@ const AdminPanel: React.FC = () => {
                             <option value="4">4</option>
                             <option value="5">5 – Hard</option>
                           </select>
-                          <select
-                            value={editDeedData.quantity}
-                            onChange={(e) => setEditDeedData((prev) => ({ ...prev, quantity: e.target.value }))}
-                            className="w-28 h-8 text-sm border border-input rounded-md bg-background px-2"
-                            title="How many times the player must do this deed"
-                          >
-                            <option value="1">Do it 1×</option>
-                            <option value="2">Do it 2×</option>
-                            <option value="3">Do it 3×</option>
-                            <option value="4">Do it 4×</option>
-                          </select>
+                          <div className="flex items-center gap-1">
+                            <span className="text-xs text-slate-500 whitespace-nowrap">Do it</span>
+                            <Input
+                              type="number"
+                              min={1}
+                              value={editDeedData.quantity}
+                              onChange={(e) => setEditDeedData((prev) => ({ ...prev, quantity: e.target.value }))}
+                              className="w-14 h-8 text-sm"
+                              title="How many times the player must do this deed"
+                            />
+                            <span className="text-xs text-slate-500">×</span>
+                          </div>
                         </div>
                         <Textarea
                           value={editDeedData.deed_text_long}
