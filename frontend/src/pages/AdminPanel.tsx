@@ -375,7 +375,7 @@ const AdminPanel: React.FC = () => {
         deed_text_long: row['deed_text_long'] || null,
         category: row['category'] || '',
         complexity: row['complexity'] ? parseInt(row['complexity']) || null : null,
-        is_active: row['is_active'] !== 'false',
+        is_active: (row['is_active'] ?? '').toLowerCase() !== 'false',
       }));
       const result = await importDeeds(deeds);
       toast.success(`Import complete — ${result.updated} updated, ${result.created} created${result.skipped > 0 ? `, ${result.skipped} skipped` : ''}`);
