@@ -85,6 +85,15 @@ const BingoCell: React.FC<BingoCellProps> = ({
     setPendingConfirm(false);
   };
 
+  // Step a multi-action cell back down one (so partial progress can be undone).
+  const handleUndoStep = () => {
+    onProgressChange?.(cell.index, Math.max(0, progress - 1));
+    setPendingConfirm(false);
+  };
+
+  // Show the undo button when a multi-action cell has progress but isn't complete.
+  const canUndoStep = !isCompleted && qty > 1 && progress > 0;
+
   const handleClick = () => {
     if (locked) return;
     if (cell.is_free_space) return;
@@ -158,23 +167,43 @@ const BingoCell: React.FC<BingoCellProps> = ({
           onTouchStart={(e) => e.stopPropagation()}
         >
           <p className="text-[7px] sm:text-[9px] font-black text-white uppercase tracking-wide text-center leading-tight">
-            {isCompleted ? 'UNMARK?' : 'MARK SQUARE?'}
+            {isCompleted ? 'UNMARK?' : qty > 1 ? 'DID IT?' : 'MARK SQUARE?'}
           </p>
-          <div className="flex gap-2">
+          {!isCompleted && qty > 1 && (
+            <p className="text-[7px] sm:text-[9px] text-amber-300 font-bold leading-none">
+              {progress} / {qty}
+            </p>
+          )}
+          <div className="flex gap-1.5 items-center">
             <div
               role="button"
               tabIndex={0}
-              className="flex items-center justify-center w-9 sm:w-11 h-7 sm:h-8 bg-emerald-500 active:bg-emerald-400 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
+              title={isCompleted ? 'Unmark' : qty > 1 ? 'Did it once more' : 'Mark complete'}
+              className="flex items-center justify-center w-8 sm:w-10 h-7 sm:h-8 bg-emerald-500 active:bg-emerald-400 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirm(); }}
               onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleConfirm(); }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleConfirm(); }}
             >
               ✓
             </div>
+            {canUndoStep && (
+              <div
+                role="button"
+                tabIndex={0}
+                title="Undo one"
+                className="flex items-center justify-center w-8 sm:w-10 h-7 sm:h-8 bg-amber-500 active:bg-amber-400 rounded-md text-white font-black text-xs sm:text-sm cursor-pointer select-none"
+                onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); handleUndoStep(); }}
+                onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); handleUndoStep(); }}
+                onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') handleUndoStep(); }}
+              >
+                −1
+              </div>
+            )}
             <div
               role="button"
               tabIndex={0}
-              className="flex items-center justify-center w-9 sm:w-11 h-7 sm:h-8 bg-rose-600/80 active:bg-rose-500 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
+              title="Cancel"
+              className="flex items-center justify-center w-8 sm:w-10 h-7 sm:h-8 bg-rose-600/80 active:bg-rose-500 rounded-md text-white font-black text-sm sm:text-base cursor-pointer select-none"
               onMouseDown={(e) => { e.preventDefault(); e.stopPropagation(); setPendingConfirm(false); }}
               onTouchEnd={(e) => { e.preventDefault(); e.stopPropagation(); setPendingConfirm(false); }}
               onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') setPendingConfirm(false); }}
