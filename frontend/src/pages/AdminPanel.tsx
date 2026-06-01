@@ -45,9 +45,9 @@ const AdminPanel: React.FC = () => {
 
   // Deeds state
   const [deeds, setDeeds] = useState<DeedItem[]>([]);
-  const [newDeed, setNewDeed] = useState({ deed_text: '', deed_text_long: '', category: '' });
+  const [newDeed, setNewDeed] = useState({ deed_text: '', deed_text_long: '', category: '', complexity: '' });
   const [editingDeed, setEditingDeed] = useState<number | null>(null);
-  const [editDeedData, setEditDeedData] = useState({ deed_text: '', deed_text_long: '', category: '' });
+  const [editDeedData, setEditDeedData] = useState({ deed_text: '', deed_text_long: '', category: '', complexity: '' });
 
   // Export / import state
   const [exportCategoryFilter, setExportCategoryFilter] = useState('all');
@@ -169,8 +169,9 @@ const AdminPanel: React.FC = () => {
         deed_text_long: newDeed.deed_text_long.trim() || undefined,
         category: newDeed.category.trim(),
         is_active: true,
+        complexity: newDeed.complexity ? parseInt(newDeed.complexity) : undefined,
       });
-      setNewDeed({ deed_text: '', deed_text_long: '', category: '' });
+      setNewDeed({ deed_text: '', deed_text_long: '', category: '', complexity: '' });
       toast.success('Gr8Day Deed added!');
       await loadData();
     } catch {
@@ -180,7 +181,10 @@ const AdminPanel: React.FC = () => {
 
   const handleUpdateDeed = async (id: number) => {
     try {
-      await updateAdminDeed(id, editDeedData);
+      await updateAdminDeed(id, {
+        ...editDeedData,
+        complexity: editDeedData.complexity ? parseInt(editDeedData.complexity) : null,
+      });
       setEditingDeed(null);
       toast.success('Gr8Day Deed updated!');
       await loadData();
@@ -853,6 +857,18 @@ const AdminPanel: React.FC = () => {
                   onChange={(e) => setNewDeed((prev) => ({ ...prev, category: e.target.value }))}
                   className="w-32 sm:w-40"
                 />
+                <select
+                  value={newDeed.complexity}
+                  onChange={(e) => setNewDeed((prev) => ({ ...prev, complexity: e.target.value }))}
+                  className="w-28 sm:w-32 border border-input rounded-md bg-background px-2 text-sm"
+                >
+                  <option value="">Complexity</option>
+                  <option value="1">1 – Easy</option>
+                  <option value="2">2</option>
+                  <option value="3">3 – Medium</option>
+                  <option value="4">4</option>
+                  <option value="5">5 – Hard</option>
+                </select>
               </div>
               <Textarea
                 placeholder="Long description (shown when a player hovers the square — optional but recommended)"
@@ -901,6 +917,18 @@ const AdminPanel: React.FC = () => {
                             className="w-28 h-8 text-sm"
                             placeholder="Category"
                           />
+                          <select
+                            value={editDeedData.complexity}
+                            onChange={(e) => setEditDeedData((prev) => ({ ...prev, complexity: e.target.value }))}
+                            className="w-24 h-8 text-sm border border-input rounded-md bg-background px-2"
+                          >
+                            <option value="">Complexity</option>
+                            <option value="1">1 – Easy</option>
+                            <option value="2">2</option>
+                            <option value="3">3 – Medium</option>
+                            <option value="4">4</option>
+                            <option value="5">5 – Hard</option>
+                          </select>
                         </div>
                         <Textarea
                           value={editDeedData.deed_text_long}
@@ -967,6 +995,7 @@ const AdminPanel: React.FC = () => {
                                 deed_text: deed.deed_text,
                                 deed_text_long: deed.deed_text_long || '',
                                 category: deed.category || '',
+                                complexity: deed.complexity != null ? String(deed.complexity) : '',
                               });
                             }}
                           >
