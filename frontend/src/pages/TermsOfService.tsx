@@ -18,97 +18,234 @@ const TermsOfService: React.FC = () => {
         </div>
       </header>
 
-      <div className="max-w-3xl mx-auto px-4 py-10 prose prose-slate">
-        <h1 className="text-3xl font-bold text-slate-900 mb-2">Terms of Service</h1>
-        <p className="text-sm text-slate-400 mb-8">Last updated: June 2026</p>
+      <div className="max-w-3xl mx-auto px-4 py-10 space-y-6 text-slate-700">
+        <div>
+          <h1 className="text-3xl font-bold text-slate-900 mb-1">HavaGr8Day Bingo Terms of Service</h1>
+          <p className="text-sm text-slate-400">Last Updated: June 1, 2026</p>
+        </div>
 
-        <p className="text-slate-600 mb-6">
-          Welcome to Havagr8day Bingo ("the Game", "we", "us", or "our"). By creating an account or
-          playing the Game, you agree to these Terms of Service. Please read them carefully.
+        <p>
+          Welcome to HavaGr8Day Bingo. By accessing or using this website, mobile application, game,
+          or related services (collectively, the "Service"), you agree to be bound by these Terms of
+          Service.
         </p>
+        <p>If you do not agree with these Terms, please do not use the Service.</p>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">1. Eligibility</h2>
-        <p className="text-slate-600">
-          You must be at least 18 years old to create an account and participate in the Game. By
-          registering, you confirm that you meet this requirement.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">1. Our Mission</h2>
+          <p>
+            HavaGr8Day Bingo is designed to encourage kindness, generosity, community involvement,
+            gratitude, and positive interactions through a fun and engaging game experience.
+          </p>
+          <p className="mt-2">
+            While we hope the game inspires meaningful actions and connections, participation is
+            entirely voluntary and users are responsible for their own actions and decisions.
+          </p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">2. How the Game Works</h2>
-        <p className="text-slate-600">
-          Havagr8day Bingo is a community-based bingo game where players complete real-world acts of
-          kindness ("Gr8Day Deeds") to mark squares on a 5×5 bingo card. A new card is generated for
-          each player every Monday. Winners are determined by the active win condition set by the
-          administrator (e.g., One Line, Two Lines, Four Corners, or Fill the Card).
-        </p>
-        <p className="text-slate-600 mt-3">
-          The Game is based on your genuine completion of acts of kindness. By marking a square as
-          complete, you confirm that you have performed the corresponding deed. False or fraudulent
-          marking may result in disqualification and account suspension.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">2. Eligibility</h2>
+          <p>
+            You must be at least 18 years of age to create an account or participate without parental
+            consent.
+          </p>
+          <p className="mt-2">
+            If you are under the age of majority in your jurisdiction, you may only participate with
+            the permission of a parent or legal guardian.
+          </p>
+          <p className="mt-2">By using the Service, you confirm that you meet these requirements.</p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">3. Wallet and Payments</h2>
-        <p className="text-slate-600">
-          The Game includes a wallet feature allowing players to add funds and use them to purchase
-          selected squares on their bingo card. All payments are processed securely through Stripe.
-          Funds added to your wallet are non-refundable once used to purchase a square. Unused wallet
-          balances may be refunded at our discretion upon request.
-        </p>
-        <p className="text-slate-600 mt-3">
-          The Game is not a form of gambling. Purchased squares do not guarantee a win. The outcome
-          of the Game depends primarily on a player's completion of Gr8Day Deeds.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">3. User Conduct</h2>
+          <p className="mb-2">Users agree to:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>Treat others with respect and kindness.</li>
+            <li>Follow all applicable laws.</li>
+            <li>Respect personal boundaries and privacy.</li>
+            <li>Act safely and responsibly at all times.</li>
+            <li>Use good judgment when interacting with others.</li>
+          </ul>
+          <p className="mt-3 mb-2">Users must not:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>Harass, threaten, intimidate, or discriminate against others.</li>
+            <li>Engage in unsafe, illegal, or harmful activities.</li>
+            <li>Misrepresent completed deeds or activities.</li>
+            <li>Use the Service to promote hate, violence, scams, or illegal conduct.</li>
+            <li>Interfere with the operation of the Service.</li>
+          </ul>
+          <p className="mt-3">
+            HavaGr8Day reserves the right to suspend or terminate accounts that violate these rules.
+          </p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">4. Prizes</h2>
-        <p className="text-slate-600">
-          A prize is offered each game week. To claim a prize, a winning player must submit their
-          contact information through the prize claim form within 14 days of winning. Unclaimed prizes
-          forfeit. Prize details, value, and availability are determined by the Game administrator and
-          may change week to week. We reserve the right to substitute prizes of equal or greater value.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">4. Good Deeds and Challenges</h2>
+          <p>
+            The deeds, challenges, suggestions, and activities provided through the Service are
+            intended as optional ideas only.
+          </p>
+          <p className="mt-2">
+            Users are solely responsible for determining whether a particular activity is appropriate,
+            safe, legal, and suitable for their circumstances.
+          </p>
+          <p className="mt-2">
+            If a deed involves interacting with another person, users must always respect the wishes,
+            comfort level, and consent of that individual.
+          </p>
+          <p className="mt-2">No user is required to complete any specific deed.</p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">5. Referrals</h2>
-        <p className="text-slate-600">
-          Players may refer others by submitting a valid email address. A referral square is marked
-          complete when a referral is submitted. We reserve the right to validate referrals and reverse
-          completions if a referral is found to be fraudulent or self-referential.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">5. Personal Responsibility</h2>
+          <p>Participation is at your own risk.</p>
+          <p className="mt-2">
+            HavaGr8Day Bingo does not supervise user activities and cannot guarantee outcomes from any
+            interaction, challenge, or deed.
+          </p>
+          <p className="mt-2">
+            Users accept full responsibility for their actions, decisions, interactions, travel,
+            purchases, donations, or other activities undertaken in connection with the Service.
+          </p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">6. Prohibited Conduct</h2>
-        <ul className="text-slate-600 space-y-2 list-disc pl-6">
-          <li>Falsely claiming to have completed Gr8Day Deeds</li>
-          <li>Creating multiple accounts to gain an unfair advantage</li>
-          <li>Using automated tools or scripts to interact with the Game</li>
-          <li>Attempting to manipulate the winner selection system</li>
-          <li>Submitting fraudulent referrals or payment information</li>
-        </ul>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">6. Prizes and Rewards</h2>
+          <p>
+            From time to time, HavaGr8Day Bingo may offer prizes, contests, rewards, promotions, or
+            giveaways.
+          </p>
+          <p className="mt-2 mb-2">Unless otherwise stated:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>No purchase is necessary to participate.</li>
+            <li>Prize availability may vary.</li>
+            <li>Prizes are awarded at the sole discretion of HavaGr8Day.</li>
+            <li>Prize values and availability may change without notice.</li>
+            <li>HavaGr8Day reserves the right to modify, suspend, or cancel any promotion at any time.</li>
+          </ul>
+          <p className="mt-3">All prize decisions are final.</p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">7. Account Suspension and Termination</h2>
-        <p className="text-slate-600">
-          We reserve the right to suspend or terminate any account at our discretion for violation of
-          these Terms, fraudulent activity, or any conduct that we determine to be harmful to the Game
-          or its community.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">7. User Content</h2>
+          <p className="mb-2">If you submit photos, comments, stories, testimonials, or other content:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>You confirm that you own or have permission to share the content.</li>
+            <li>
+              You grant HavaGr8Day a non-exclusive, royalty-free, worldwide licence to display,
+              publish, promote, and distribute that content in connection with the Service.
+            </li>
+            <li>You retain ownership of your content.</li>
+          </ul>
+          <p className="mt-3">
+            We reserve the right to remove content that violates these Terms or is otherwise deemed
+            inappropriate.
+          </p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">8. Limitation of Liability</h2>
-        <p className="text-slate-600">
-          To the fullest extent permitted by law, Havagr8day Bingo and its operators shall not be
-          liable for any indirect, incidental, or consequential damages arising from your use of the
-          Game. The Game is provided "as is" without warranty of any kind.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">8. Privacy</h2>
+          <p>Your use of the Service is also governed by our Privacy Policy.</p>
+          <p className="mt-2">
+            By using the Service, you consent to the collection and use of information as described in
+            that policy.
+          </p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">9. Changes to These Terms</h2>
-        <p className="text-slate-600">
-          We may update these Terms from time to time. Continued use of the Game after changes are
-          posted constitutes your acceptance of the updated Terms.
-        </p>
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">9. No Guarantees</h2>
+          <p>
+            We hope HavaGr8Day Bingo creates smiles, positive experiences, and meaningful connections.
+          </p>
+          <p className="mt-2 mb-2">However, we make no guarantees regarding:</p>
+          <ul className="list-disc pl-6 space-y-1">
+            <li>Personal outcomes</li>
+            <li>Relationships</li>
+            <li>Employment opportunities</li>
+            <li>Health benefits</li>
+            <li>Financial benefits</li>
+            <li>Prize winnings</li>
+            <li>Community impact</li>
+          </ul>
+          <p className="mt-3">Individual results will vary.</p>
+        </section>
 
-        <h2 className="text-xl font-bold text-slate-800 mt-8 mb-3">10. Contact</h2>
-        <p className="text-slate-600">
-          For questions about these Terms, please contact us at{' '}
-          <a href="mailto:support@havagr8day.com" className="text-indigo-600 underline">
-            support@havagr8day.com
-          </a>
-          .
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">10. Disclaimer of Warranties</h2>
+          <p>The Service is provided on an "as is" and "as available" basis.</p>
+          <p className="mt-2">
+            To the maximum extent permitted by law, HavaGr8Day disclaims all warranties, express or
+            implied, including warranties of merchantability, fitness for a particular purpose, and
+            non-infringement.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">11. Limitation of Liability</h2>
+          <p>
+            To the fullest extent permitted by law, HavaGr8Day, its owners, volunteers, partners,
+            affiliates, officers, employees, and representatives shall not be liable for any direct,
+            indirect, incidental, special, consequential, or punitive damages arising from or related
+            to:
+          </p>
+          <ul className="list-disc pl-6 mt-2 space-y-1">
+            <li>Use of the Service</li>
+            <li>Participation in deeds or activities</li>
+            <li>Interactions with other users</li>
+            <li>Prize programs</li>
+            <li>Technical interruptions</li>
+            <li>User-generated content</li>
+          </ul>
+          <p className="mt-3">Your sole remedy for dissatisfaction with the Service is to stop using it.</p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">12. Changes to the Service</h2>
+          <p>
+            We may update, modify, suspend, or discontinue any part of the Service at any time without
+            notice.
+          </p>
+          <p className="mt-2">
+            We may also update these Terms from time to time. Continued use of the Service following
+            any changes constitutes acceptance of the updated Terms.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">13. Termination</h2>
+          <p>
+            We reserve the right to suspend or terminate access to the Service at any time, with or
+            without notice, if we believe a user has violated these Terms or acted in a manner
+            inconsistent with the spirit of the community.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">14. Governing Law</h2>
+          <p>
+            These Terms shall be governed by and interpreted in accordance with the laws of the
+            Province of Ontario and the laws of Canada applicable therein.
+          </p>
+          <p className="mt-2">
+            Any disputes arising from these Terms shall be subject to the exclusive jurisdiction of
+            the courts of Ontario, Canada.
+          </p>
+        </section>
+
+        <section>
+          <h2 className="text-xl font-bold text-slate-900 mb-2">15. Contact Us</h2>
+          <p>Questions regarding these Terms may be directed to:</p>
+          <address className="mt-2 not-italic text-slate-600">
+            HavaGr8Day Bingo<br />
+            Ontario, Canada<br />
+            <a href="https://www.havagr8day.com" className="text-indigo-600 underline underline-offset-2">
+              www.havagr8day.com
+            </a>
+          </address>
+        </section>
+
+        <p className="pt-4 pb-8 text-slate-500 italic text-center">
+          Thank you for helping make the world a little brighter, one good deed at a time.
         </p>
       </div>
     </div>
