@@ -1,7 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { createAccessToken, getAuthUser, requireAuth } from '../_shared/auth.ts'
 import { getSupabase, getSubPath } from '../_shared/db.ts'
-import { sendEmail, referralJoinedEmail } from '../_shared/email.ts'
+import { sendEmail, referralJoinedEmail, welcomeEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 Deno.serve(async (req: Request) => {
@@ -91,6 +91,14 @@ Deno.serve(async (req: Request) => {
         }
       } catch (refErr) {
         console.error('referral validation error:', refErr)
+      }
+
+      // Send a welcome email (best-effort, never blocks registration).
+      try {
+        const tpl = welcomeEmail(user.name ?? user.username ?? null)
+        await sendEmail({ to: email, subject: tpl.subject, html: tpl.html })
+      } catch (welErr) {
+        console.error('welcome email error:', welErr)
       }
 
       const token = await createAccessToken({

@@ -117,3 +117,49 @@ export function referralInviteEmail(referrerName: string | null): { subject: str
     `),
   }
 }
+
+export function welcomeEmail(name: string | null): { subject: string; html: string } {
+  const hi = name && name.trim() ? name.trim() : 'there'
+  return {
+    subject: 'Welcome to Havagr8day Bingo! 🎉',
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#4F46E5;font-size:20px">Welcome, ${hi}!</h2>
+      <p>Your account is ready. Havagr8day Bingo is all about doing real acts of kindness to mark squares on your card and win prizes.</p>
+      <p>A fresh card is generated every Monday. Complete deeds, mark your squares, refer a friend to unlock the centre square, and aim for Bingo!</p>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${SITE_URL}/game" style="display:inline-block;background:#DC2626;color:#fff;font-weight:bold;padding:13px 30px;border-radius:10px;text-decoration:none;border:2px solid #FCD34D">Play Now</a>
+      </p>
+      <p style="color:#64748b;font-size:13px">Thanks for joining the community. Have a gr8 day!</p>
+    `),
+  }
+}
+
+export function bingoWinEmail(name: string | null, winConditionLabel?: string | null): { subject: string; html: string } {
+  const hi = name && name.trim() ? name.trim() : 'Champion'
+  const cond = winConditionLabel && winConditionLabel.trim() ? ` (${winConditionLabel.trim()})` : ''
+  return {
+    subject: 'BINGO! You completed your Havagr8day card 🏆',
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#10B981;font-size:22px">BINGO, ${hi}! 🏆</h2>
+      <p>You completed your card${cond}. Every square you marked was a real act of kindness, well done!</p>
+      <p>Open your card to claim your prize and start spreading more kindness.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${SITE_URL}/game" style="display:inline-block;background:#10B981;color:#fff;font-weight:bold;padding:13px 30px;border-radius:10px;text-decoration:none">View My Card</a>
+      </p>
+      <p style="color:#64748b;font-size:13px">Keep being gr8.</p>
+    `),
+  }
+}
+
+export function prizeClaimConfirmationEmail(name: string | null): { subject: string; html: string } {
+  const hi = name && name.trim() ? name.trim() : 'there'
+  return {
+    subject: 'We received your Havagr8day prize claim',
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#4F46E5;font-size:20px">Claim received, ${hi}!</h2>
+      <p>Thanks for submitting your prize claim. Our team will review it and contact you within 48 hours to arrange your reward.</p>
+      <p>If you have any questions in the meantime, just reply to this email.</p>
+      <p style="color:#64748b;font-size:13px">Congratulations again, and thank you for playing.</p>
+    `),
+  }
+}

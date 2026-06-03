@@ -1,7 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { getAuthUser, requireAuth } from '../_shared/auth.ts'
 import { getSupabase, getSubPath, matchPath } from '../_shared/db.ts'
-import { sendEmail, passwordResetEmail, referralInviteEmail } from '../_shared/email.ts'
+import { sendEmail, passwordResetEmail, referralInviteEmail, bingoWinEmail, prizeClaimConfirmationEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -86,6 +86,12 @@ function checkBingo(completed: number[], winCondition: string): boolean {
 function parseJsonArr(raw: string | null | undefined): number[] {
   try { return JSON.parse(raw ?? '[]') } catch { return [] }
 }
+
+const WIN_LABELS: Record<string, string> = {
+  one_line: 'One Line', two_lines: 'Two Lines', four_corners: 'Four Corners',
+  x_pattern: 'X Pattern', around_the_edges: 'Around the Edges', fill_card: 'Fill the Card',
+}
+function winLabel(cond: string): string { return WIN_LABELS[cond] ?? cond }
 
 // ── Main handler ─────────────────────────────────────────────────────────────
 Deno.serve(async (req: Request) => {
@@ -380,6 +386,12 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq('id', card_id)
 
+      // First time the card reaches Bingo: congratulate by email (best-effort).
+      if (isBingo && !card.is_bingo && user.email) {
+        const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+        await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+      }
+
       const resp: Record<string, unknown> = { success: true, completed_cells: completed, is_bingo: isBingo }
       if (secretRewardAwarded !== null) resp.secret_reward = secretRewardAwarded
       return jsonResponse(resp)
@@ -461,6 +473,12 @@ Deno.serve(async (req: Request) => {
         is_bingo: isBingo,
         updated_at: new Date().toISOString(),
       }).eq('id', card_id)
+
+      // First time the card reaches Bingo: congratulate by email (best-effort).
+      if (isBingo && !card.is_bingo && user.email) {
+        const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+        await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+      }
 
       return jsonResponse({ success: true, purchased_cells: purchased, new_balance: newBalance, is_bingo: isBingo })
     }
@@ -1063,6 +1081,16 @@ Deno.serve(async (req: Request) => {
       if (tokenRow.used_at) return errorResponse('This reset link has already been used', 400)
       if (new Date(tokenRow.expires_at) < new Date()) return errorResponse('Reset link has expired. Please request a new one.', 400)
 
+      // Reject reusing the current password as the new password.
+      const { data: existingUser } = await supabase
+        .from('users').select('password_hash').eq('id', tokenRow.user_id).maybeSingle()
+      if (existingUser?.password_hash) {
+        const sameAsOld = await bcrypt.compare(newPassword, existingUser.password_hash)
+        if (sameAsOld) {
+          return errorResponse('Your new password must be different from your current password.', 400)
+        }
+      }
+
       // Hash the new password with bcrypt to match the login check (auth-custom uses bcrypt).
       const passwordHash = await bcrypt.hash(newPassword, 10)
 
@@ -1107,6 +1135,13 @@ Deno.serve(async (req: Request) => {
         status: 'pending',
       })
       if (error) throw error
+
+      // Confirmation email to the claimant (best-effort).
+      const claimantEmail = String(email).trim().toLowerCase()
+      if (claimantEmail) {
+        const tpl = prizeClaimConfirmationEmail(String(full_name).trim() || null)
+        await sendEmail({ to: claimantEmail, subject: tpl.subject, html: tpl.html })
+      }
 
       return jsonResponse({ success: true, message: 'Prize claim submitted! We will contact you within 48 hours.' })
     }
