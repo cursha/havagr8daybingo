@@ -1,5 +1,21 @@
 # Good Deeds Bingo Game - Development Plan
 
+---
+
+## 🔭 Feature Backlog (agreed with Curt — not yet built)
+
+These are confirmed features Curt asked for, to build later (not now). Added Jun 3, 2026.
+
+- [ ] **Card locks during an active game** — once a player's weekly card is generated, deed edits (e.g. changing quantity) do NOT change their current card. Changes apply to the **next** game. (Currently changes apply on next page load.)
+- [ ] **Flip Three Squares power-up** — a player can use it once per game. They must select exactly three squares, which are then randomly replaced with new deeds.
+- [ ] **Challenge Level** — players choose the difficulty level (the complexity 1 / 3 / 5) they want their card generated at. Needs consistent names for the levels (e.g. Easy / Medium / Hard).
+- [ ] **Invite-a-friend email** — actually send the referral invitation email. Blocked on the email system (Resend/SendGrid) being configured.
+
+### Also pending a decision
+- [ ] **Prize image hosting** — Curt wants to host prize images on the site (havagr8day.com/images/...) but there is no upload mechanism. Decide between: (a) build a Supabase Storage upload button in the admin [recommended], or (b) host externally (Imgur etc.) and paste the URL [works today].
+
+---
+
 ## Design Guidelines
 
 ### Design References
