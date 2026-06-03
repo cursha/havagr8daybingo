@@ -36,7 +36,7 @@ Deno.serve(async (req: Request) => {
       const user = requireAuth(authUser)
       const { data, error } = await supabase
         .from('users')
-        .select('profile_completed, signup_bonus_granted, first_name, last_name, email')
+        .select('profile_completed, signup_bonus_granted, first_name, last_name, email, province_state, country, challenge_level')
         .eq('id', user.sub)
         .maybeSingle()
       if (error) throw error
@@ -49,6 +49,9 @@ Deno.serve(async (req: Request) => {
         first_name: data.first_name ?? null,
         last_name: data.last_name ?? null,
         email: data.email ?? null,
+        province_state: data.province_state ?? null,
+        country: data.country ?? null,
+        challenge_level: data.challenge_level ?? null,
         signup_bonus_amount: bonusAmount,
       })
     }
@@ -66,6 +69,15 @@ Deno.serve(async (req: Request) => {
         return errorResponse('first_name, last_name, and email are required', 400)
       }
 
+      // Optional profile fields
+      const provinceState = body.province_state != null ? String(body.province_state).trim() : null
+      const country = body.country != null ? String(body.country).trim() : null
+      let challengeLevel: number | null = null
+      if (body.challenge_level != null && String(body.challenge_level).trim() !== '') {
+        const lvl = Number(body.challenge_level)
+        if (Number.isFinite(lvl) && lvl >= 1 && lvl <= 5) challengeLevel = Math.round(lvl)
+      }
+
       const { data: dbUser, error: userErr } = await supabase
         .from('users')
         .select('*')
@@ -80,6 +92,9 @@ Deno.serve(async (req: Request) => {
         last_name: lastName,
         email,
         name: dbUser.name || `${firstName} ${lastName}`.trim(),
+        province_state: provinceState,
+        country,
+        challenge_level: challengeLevel,
         profile_completed: true,
       }).eq('id', user.sub)
 

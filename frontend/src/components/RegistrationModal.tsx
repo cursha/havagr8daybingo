@@ -37,6 +37,9 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
+  const [provinceState, setProvinceState] = useState('');
+  const [country, setCountry] = useState('');
+  const [challengeLevel, setChallengeLevel] = useState('');
   const [bonusAmount, setBonusAmount] = useState<number>(15);
 
   useEffect(() => {
@@ -55,6 +58,9 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
           setEmail(status?.email ?? '');
           setFirstName(status?.first_name ?? '');
           setLastName(status?.last_name ?? '');
+          setProvinceState(status?.province_state ?? '');
+          setCountry(status?.country ?? '');
+          setChallengeLevel(status?.challenge_level != null ? String(status.challenge_level) : '');
           setOpen(true);
         }
       } catch {
@@ -88,7 +94,14 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
 
     setSubmitting(true);
     try {
-      const data = await registerProfile({ first_name: fn, last_name: ln, email: mail });
+      const data = await registerProfile({
+        first_name: fn,
+        last_name: ln,
+        email: mail,
+        province_state: provinceState.trim() || undefined,
+        country: country.trim() || undefined,
+        challenge_level: challengeLevel ? parseInt(challengeLevel) : null,
+      });
       if (data?.bonus_granted) {
         toast.success(`🎉 Welcome! ${bonusLabel} has been credited to your wallet.`);
       } else {
@@ -184,6 +197,47 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
               autoComplete="email"
               required
             />
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="provinceState">Province / State</Label>
+              <Input
+                id="provinceState"
+                value={provinceState}
+                onChange={(e) => setProvinceState(e.target.value)}
+                placeholder="e.g. Ontario"
+                autoComplete="address-level1"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="country">Country</Label>
+              <Input
+                id="country"
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="e.g. Canada"
+                autoComplete="country-name"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="challengeLevel">Challenge Level</Label>
+            <select
+              id="challengeLevel"
+              value={challengeLevel}
+              onChange={(e) => setChallengeLevel(e.target.value)}
+              className="w-full h-10 border border-input rounded-md bg-background px-3 text-sm"
+            >
+              <option value="">No preference</option>
+              <option value="1">1 - Easiest</option>
+              <option value="2">2 - Easy</option>
+              <option value="3">3 - Medium</option>
+              <option value="4">4 - Hard</option>
+              <option value="5">5 - Hardest</option>
+            </select>
+            <p className="text-xs text-slate-500">How challenging you'd like your deeds to be. You can change this later.</p>
           </div>
 
           <Button

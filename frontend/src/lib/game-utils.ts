@@ -308,6 +308,26 @@ export async function updatePrizeClaimStatus(id: number, status: string): Promis
   return apiClient.put(`/game/admin/prize-claims/${id}`, { status });
 }
 
+// ---------- Member list (admin) ----------
+export interface MemberItem {
+  id: string;
+  name: string;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  email: string | null;
+  role: string;
+  challenge_level: number | null;
+  province_state: string | null;
+  country: string | null;
+  last_login: string | null;
+  profile_completed: boolean;
+}
+
+export async function getAdminMembers(): Promise<{ members: MemberItem[] }> {
+  return withRetry(() => apiClient.get<{ members: MemberItem[] }>('/game/admin/members'));
+}
+
 // ---------- Registration ----------
 export interface ProfileStatus {
   profile_completed: boolean;
@@ -315,6 +335,9 @@ export interface ProfileStatus {
   first_name?: string | null;
   last_name?: string | null;
   email?: string | null;
+  province_state?: string | null;
+  country?: string | null;
+  challenge_level?: number | null;
   signup_bonus_amount?: number;
 }
 
@@ -337,6 +360,9 @@ export async function registerProfile(payload: {
   first_name: string;
   last_name: string;
   email: string;
+  province_state?: string;
+  country?: string;
+  challenge_level?: number | null;
 }): Promise<RegisterProfileResult> {
   return apiClient.post<RegisterProfileResult>('/registration/register', payload);
 }

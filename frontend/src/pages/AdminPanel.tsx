@@ -18,6 +18,8 @@ import {
   importDeeds,
   getAdminPrizeClaims,
   updatePrizeClaimStatus,
+  getAdminMembers,
+  MemberItem,
 } from '@/lib/game-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -25,7 +27,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail } from 'lucide-react';
+import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users } from 'lucide-react';
 
 const WIN_CONDITIONS = [
   { id: 'one_line', name: 'One Line', description: 'Complete 5 in a row (horizontal, vertical, or diagonal)' },
@@ -65,6 +67,10 @@ const AdminPanel: React.FC = () => {
 
   // Prize claims state
   const [prizeClaims, setPrizeClaims] = useState<PrizeClaim[]>([]);
+
+  // Member list state
+  const [members, setMembers] = useState<MemberItem[]>([]);
+  const [memberChallengeFilter, setMemberChallengeFilter] = useState('all');
 
   const handleLogin = async () => {
     setAuthLoading(true);
@@ -130,11 +136,21 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  const loadMembers = async () => {
+    try {
+      const res = await getAdminMembers();
+      setMembers(res.members || []);
+    } catch {
+      // silent
+    }
+  };
+
   useEffect(() => {
     if (authenticated) {
       loadData();
       loadPendingDeeds('pending');
       loadPrizeClaims();
+      loadMembers();
     }
   }, [authenticated]);
 
@@ -421,6 +437,63 @@ const AdminPanel: React.FC = () => {
     }
   }
 
+  const getFilteredMembers = (): MemberItem[] => {
+    let result = [...members];
+    if (memberChallengeFilter === 'none') {
+      result = result.filter((m) => m.challenge_level == null);
+    } else if (memberChallengeFilter !== 'all') {
+      const lvl = parseInt(memberChallengeFilter);
+      result = result.filter((m) => m.challenge_level === lvl);
+    }
+    return result;
+  };
+
+  function handlePrintMembers() {
+    const list = getFilteredMembers();
+    const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
+    const filterDesc =
+      memberChallengeFilter === 'all' ? 'All members'
+      : memberChallengeFilter === 'none' ? 'No challenge level set'
+      : `Challenge level ${memberChallengeFilter}`;
+    const rows = list.map((m) => `
+      <tr>
+        <td>${esc(m.name) || '—'}</td>
+        <td>${esc(m.email) || '—'}</td>
+        <td>${esc(m.province_state) || '—'}</td>
+        <td>${esc(m.country) || '—'}</td>
+        <td class="ctr">${m.challenge_level ?? '—'}</td>
+        <td>${fmtDate(m.last_login)}</td>
+      </tr>`).join('');
+    const html = `<!DOCTYPE html>
+<html><head><meta charset="utf-8" /><title>Gr8Day Members</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{font-family:Arial,sans-serif;font-size:11px;color:#1e293b;padding:20px}
+  h1{font-size:18px;margin-bottom:4px}
+  .meta{font-size:10px;color:#64748b;margin-bottom:12px}
+  table{width:100%;border-collapse:collapse}
+  th{background:#f1f5f9;text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.05em;border-bottom:2px solid #e2e8f0}
+  td{padding:5px 8px;border-bottom:1px solid #e2e8f0;vertical-align:top}
+  .ctr{text-align:center}
+  tr:nth-child(even) td{background:#f8fafc}
+  @media print{body{padding:0}@page{margin:15mm}}
+</style></head>
+<body>
+  <h1>Gr8Day Members</h1>
+  <p class="meta">${list.length} member${list.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${filterDesc} &nbsp;·&nbsp; ${new Date().toLocaleDateString()}</p>
+  <table>
+    <thead><tr><th>Name</th><th>Email</th><th>Province / State</th><th>Country</th><th>Challenge</th><th>Last Active</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>
+  <script>window.onload=function(){window.print();}</script>
+</body></html>`;
+    const win = window.open('', '_blank');
+    if (!win) { toast.error('Pop-up blocked — please allow pop-ups and try again'); return; }
+    win.document.write(html);
+    win.document.close();
+  }
+
   const uniqueCategories = [...new Set(deeds.map((d) => d.category).filter(Boolean))].sort();
 
   if (!authenticated) {
@@ -504,6 +577,86 @@ const AdminPanel: React.FC = () => {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Member List */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between flex-wrap gap-2">
+              <span className="flex items-center gap-2">
+                <Users className="w-5 h-5 text-sky-500" />
+                Members ({members.length})
+              </span>
+              <div className="flex items-center gap-2">
+                <Select value={memberChallengeFilter} onValueChange={setMemberChallengeFilter}>
+                  <SelectTrigger className="w-44 h-8 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All challenge levels</SelectItem>
+                    <SelectItem value="1">Level 1 - Easiest</SelectItem>
+                    <SelectItem value="2">Level 2 - Easy</SelectItem>
+                    <SelectItem value="3">Level 3 - Medium</SelectItem>
+                    <SelectItem value="4">Level 4 - Hard</SelectItem>
+                    <SelectItem value="5">Level 5 - Hardest</SelectItem>
+                    <SelectItem value="none">No level set</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button variant="outline" size="sm" onClick={handlePrintMembers} disabled={members.length === 0}>
+                  <Printer className="w-4 h-4 mr-1" /> Print / PDF
+                </Button>
+              </div>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-slate-500 mb-3">
+              Every registered player. {getFilteredMembers().length} shown with the current filter.
+            </p>
+            {members.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm flex flex-col items-center gap-2">
+                <Users className="w-8 h-8 text-slate-300" />
+                No members yet.
+              </div>
+            ) : (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[420px] overflow-y-auto">
+                  <table className="w-full text-sm">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
+                        <th className="px-3 py-2">Name</th>
+                        <th className="px-3 py-2">Email</th>
+                        <th className="px-3 py-2">Location</th>
+                        <th className="px-3 py-2 text-center">Challenge</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {getFilteredMembers().map((m) => (
+                        <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="px-3 py-2">
+                            <span className="font-medium text-slate-800">{m.name || '—'}</span>
+                            {m.role === 'admin' && (
+                              <span className="ml-1.5 text-[10px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded">admin</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {m.email ? <a href={`mailto:${m.email}`} className="text-indigo-600 hover:underline">{m.email}</a> : '—'}
+                          </td>
+                          <td className="px-3 py-2 text-slate-600">
+                            {[m.province_state, m.country].filter(Boolean).join(', ') || '—'}
+                          </td>
+                          <td className="px-3 py-2 text-center">
+                            {m.challenge_level != null ? (
+                              <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-semibold">{m.challenge_level}</span>
+                            ) : <span className="text-slate-300">—</span>}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Game Mode Selection */}
         <Card>
           <CardHeader>

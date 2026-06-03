@@ -649,6 +649,30 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
+    // ── GET /admin/members ────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/members') {
+      const { data } = await supabase
+        .from('users')
+        .select('id, email, username, name, first_name, last_name, role, challenge_level, province_state, country, last_login, profile_completed')
+        .order('last_login', { ascending: false })
+      return jsonResponse({
+        members: (data ?? []).map((u) => ({
+          id: u.id,
+          name: u.name ?? `${u.first_name ?? ''} ${u.last_name ?? ''}`.trim(),
+          first_name: u.first_name ?? null,
+          last_name: u.last_name ?? null,
+          username: u.username ?? null,
+          email: u.email ?? null,
+          role: u.role ?? 'user',
+          challenge_level: u.challenge_level ?? null,
+          province_state: u.province_state ?? null,
+          country: u.country ?? null,
+          last_login: u.last_login ?? null,
+          profile_completed: !!u.profile_completed,
+        })),
+      })
+    }
+
     // ── GET /admin/deeds ──────────────────────────────────────────────────────
     if (method === 'GET' && path === '/admin/deeds') {
       const { data } = await supabase.from('good_deeds').select('*').order('id')
