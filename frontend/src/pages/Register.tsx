@@ -82,7 +82,7 @@ const Register: React.FC = () => {
                 id="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="alex_k"
+                placeholder="Choose a username"
                 autoComplete="username"
                 required
               />

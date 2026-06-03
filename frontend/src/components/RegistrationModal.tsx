@@ -156,7 +156,7 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
                 id="firstName"
                 value={firstName}
                 onChange={(e) => setFirstName(e.target.value)}
-                placeholder="Alex"
+                placeholder="Your first name"
                 autoComplete="given-name"
                 required
               />
@@ -167,7 +167,7 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
                 id="lastName"
                 value={lastName}
                 onChange={(e) => setLastName(e.target.value)}
-                placeholder="Johnson"
+                placeholder="Your last name"
                 autoComplete="family-name"
                 required
               />

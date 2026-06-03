@@ -1,6 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { createAccessToken, getAuthUser, requireAuth } from '../_shared/auth.ts'
 import { getSupabase, getSubPath } from '../_shared/db.ts'
+import { sendEmail, referralJoinedEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 Deno.serve(async (req: Request) => {
@@ -62,6 +63,35 @@ Deno.serve(async (req: Request) => {
         .single()
 
       if (error) throw error
+
+      // If this email was referred by someone, validate that referral now and
+      // reward each referrer. Their "Refer a Player" square auto-marks on their
+      // next card load (generate-card re-syncs referral squares when a validated
+      // referral exists). Best-effort: never block registration if this fails.
+      try {
+        const { data: pendingRefs } = await supabase
+          .from('referrals')
+          .select('id, user_id')
+          .eq('referred_email', email)
+          .eq('is_validated', false)
+        if (pendingRefs && pendingRefs.length > 0) {
+          await supabase.from('referrals')
+            .update({ is_validated: true })
+            .eq('referred_email', email)
+            .eq('is_validated', false)
+          const referrerIds = [...new Set(pendingRefs.map((r) => r.user_id))]
+          for (const rid of referrerIds) {
+            const { data: referrer } = await supabase
+              .from('users').select('email').eq('id', rid).maybeSingle()
+            if (referrer?.email) {
+              const tpl = referralJoinedEmail(user.name ?? user.username ?? null)
+              await sendEmail({ to: referrer.email, subject: tpl.subject, html: tpl.html })
+            }
+          }
+        }
+      } catch (refErr) {
+        console.error('referral validation error:', refErr)
+      }
 
       const token = await createAccessToken({
         sub: user.id,

@@ -97,10 +97,13 @@ export function downloadBingoCardPdf(
 
       // Find the cell data (cells come from backend keyed by `index`).
       const cell = card.cells.find((c) => c.index === idx);
-      const isCompleted = card.completed_cells?.includes(idx);
       const isPurchased = card.purchased_cells?.includes(idx);
       const isReferral = card.referral_cells?.includes(idx);
       const isFree = !!cell?.is_free;
+      // A square counts as achieved (shaded + X) if it is marked complete,
+      // purchased, or earned via referral — matching how the live board shows it.
+      const isCompleted =
+        card.completed_cells?.includes(idx) || isPurchased || isReferral;
 
       // Background shading — all grayscale.
       if (isCompleted) {

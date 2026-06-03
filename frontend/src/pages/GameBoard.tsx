@@ -245,7 +245,7 @@ const GameBoard: React.FC = () => {
     setActionLoading(true);
     try {
       await submitReferral(referralEmail.trim());
-      toast.success('Referral submitted! All "Refer a Player" squares are now marked!');
+      toast.success('Invitation sent! Your square unlocks once your friend creates an account.');
       setReferralEmail('');
       await loadGame();
     } catch (err: any) {
@@ -627,7 +627,7 @@ const GameBoard: React.FC = () => {
             Invite a Friend
           </h3>
           <p className="text-xs text-indigo-300/60 mb-3">
-            Refer a player and ALL "Refer a Player" squares on your card will be automatically marked!
+            Invite a friend by email. When they create an account, your "Refer a Player" square unlocks automatically.
           </p>
           <div className="flex gap-2">
             <Input

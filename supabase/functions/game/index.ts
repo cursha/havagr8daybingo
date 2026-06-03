@@ -480,27 +480,13 @@ Deno.serve(async (req: Request) => {
         .eq('user_id', user.sub).eq('referred_email', referredEmail).maybeSingle()
       if (existing) return errorResponse('You have already referred this email', 400)
 
+      // Record the referral as PENDING. The reward (the "Refer a Player" square)
+      // is granted only when the friend actually registers with this email — see
+      // the referral validation in the auth-custom /register endpoint. This blocks
+      // the fake-email loophole and makes a referral mean a real new player.
       await supabase.from('referrals').insert({
-        user_id: user.sub, referred_email: referredEmail, is_validated: true,
+        user_id: user.sub, referred_email: referredEmail, is_validated: false,
       })
-
-      // Mark all referral squares on the current card
-      const weekYear = getCurrentWeekYear()
-      const { data: card } = await supabase
-        .from('player_cards').select('*')
-        .eq('user_id', user.sub).eq('week_year', weekYear).maybeSingle()
-      if (card) {
-        const cells: Cell[] = JSON.parse(card.card_data)
-        const allReferralPos = cells.filter((c) => c.is_referral_free).map((c) => c.index)
-        const completed = parseJsonArr(card.completed_cells)
-        const purchased = parseJsonArr(card.purchased_cells)
-        const allCompleted = [...new Set([...completed, ...purchased, ...allReferralPos])]
-        await supabase.from('player_cards').update({
-          referral_cells: JSON.stringify(allReferralPos),
-          is_bingo: checkBingo(allCompleted, card.win_condition),
-          updated_at: new Date().toISOString(),
-        }).eq('id', card.id)
-      }
 
       // Send the invitation email to the referred friend (best-effort).
       const referrerName = (user.name as string | undefined) ?? null
@@ -524,7 +510,7 @@ Deno.serve(async (req: Request) => {
 
       return jsonResponse({
         success: true,
-        message: 'Referral submitted successfully',
+        message: 'Invitation sent! Your "Refer a Player" square unlocks when your friend creates an account.',
         email_sent: emailResult.sent,
       })
     }

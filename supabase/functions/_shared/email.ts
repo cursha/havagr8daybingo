@@ -85,6 +85,22 @@ export function passwordResetEmail(resetUrl: string): { subject: string; html: s
   }
 }
 
+export function referralJoinedEmail(friendName: string | null): { subject: string; html: string } {
+  const friend = friendName && friendName.trim() ? friendName.trim() : 'Someone you invited'
+  return {
+    subject: 'Your friend joined Havagr8day Bingo! 🎉',
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#4F46E5;font-size:20px">Your referral counted!</h2>
+      <p><strong>${friend}</strong> just created an account using your invite.</p>
+      <p>Your "Refer a Player" square is now unlocked. Open your card to see it marked.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${SITE_URL}/game" style="display:inline-block;background:#10B981;color:#fff;font-weight:bold;padding:13px 30px;border-radius:10px;text-decoration:none">Go to My Card</a>
+      </p>
+      <p style="color:#64748b;font-size:13px">Thank you for helping the community grow.</p>
+    `),
+  }
+}
+
 export function referralInviteEmail(referrerName: string | null): { subject: string; html: string } {
   const who = referrerName && referrerName.trim() ? referrerName.trim() : 'A friend'
   const playUrl = `${SITE_URL}/register`
