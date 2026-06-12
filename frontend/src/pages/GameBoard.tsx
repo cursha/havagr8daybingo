@@ -1,10 +1,15 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { APP_VERSION } from '@/lib/version';
+import { getRegistrationStatus } from '@/lib/game-utils';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   CardData,
   WalletData,
   PendingDeed,
+  MyTeamData,
+  DareSpinResult,
+  PlayerBadge,
   generateCard,
   markCell,
   unmarkCell,
@@ -15,16 +20,21 @@ import {
   getMySuggestions,
   getPublicPrize,
   resetCard,
+  getMyTeam,
+  getMyTrades,
+  spinDare,
+  getMyProfile,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
 import RegistrationModal from '@/components/RegistrationModal';
+import DareModal from '@/components/DareModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Heart, Wallet, ArrowLeft, Send, RefreshCw, Trophy, Users, DollarSign, Sparkles, Target, Lightbulb, Clock, CheckCircle2, XCircle, Shield, Lock, PartyPopper, Medal, LogOut, Printer } from 'lucide-react';
-import { downloadBingoCardPdf } from '@/lib/bingo-pdf';
+import { downloadBingoCardPdf, downloadTeamCardsPdf, TeamMemberCard } from '@/lib/bingo-pdf';
 
 const HEADER_LETTERS = ['GR', '8', 'D', 'A', 'Y'];
 const HEADER_COLORS = [
@@ -67,12 +77,41 @@ const GameBoard: React.FC = () => {
   const [mySuggestions, setMySuggestions] = useState<PendingDeed[]>([]);
   const [suggesting, setSuggesting] = useState(false);
   const [prize, setPrize] = useState<{ prize_image_url: string; prize_title: string } | null>(null);
+  const [playerNumber, setPlayerNumber] = useState<number | null>(null);
+  const [playerBadge, setPlayerBadge] = useState<PlayerBadge | null>(null);
+  const [myTeam, setMyTeam] = useState<MyTeamData | null>(null);
+  const [dareResult, setDareResult] = useState<DareSpinResult | null>(null);
+  const [dareSpinning, setDareSpinning] = useState(false);
+  const [pendingTradeCount, setPendingTradeCount] = useState(0);
 
   useEffect(() => {
     getPublicPrize()
       .then((p) => setPrize(p))
       .catch(() => setPrize(null));
   }, []);
+
+  useEffect(() => {
+    if (user) {
+      getRegistrationStatus()
+        .then((s) => setPlayerNumber((s as any)?.player_number ?? null))
+        .catch(() => {});
+      getMyProfile()
+        .then((p) => setPlayerBadge(p))
+        .catch(() => {});
+      getMyTeam()
+        .then((res) => setMyTeam(res.team))
+        .catch(() => setMyTeam(null));
+      getMyTrades()
+        .then((res) => {
+          const userId = (user as any)?.sub ?? (user as any)?.id ?? '';
+          const pending = res.trades.filter(
+            (t) => t.to_user_id === userId && t.status === 'pending'
+          ).length;
+          setPendingTradeCount(pending);
+        })
+        .catch(() => setPendingTradeCount(0));
+    }
+  }, [user]);
 
   useEffect(() => {
     if (authLoading) return;
@@ -291,6 +330,58 @@ const GameBoard: React.FC = () => {
     }
   };
 
+  const handlePrintTeamPdf = async () => {
+    if (!myTeam) return;
+    try {
+      const winConditionLabel = card?.win_condition
+        ? WIN_CONDITION_LABELS[card.win_condition] || card.win_condition
+        : undefined;
+
+      // Use cached team data — cards were fetched server-side
+      const membersWithCards: TeamMemberCard[] = myTeam.members
+        .filter((m) => m.card != null)
+        .map((m) => {
+          const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || m.username || 'Player';
+          const pn = m.player_number ? `GR8-${m.player_number}` : null;
+          return { playerName: name, playerNumber: pn, card: m.card! };
+        });
+
+      if (membersWithCards.length === 0) {
+        toast.error('No team members have cards generated yet.');
+        return;
+      }
+
+      downloadTeamCardsPdf(myTeam.team_name, membersWithCards, { winConditionLabel });
+      toast.success('Team bingo cards are downloading.');
+    } catch (err) {
+      console.error('Failed to generate team PDF', err);
+      toast.error('Could not generate the team card. Please try again.');
+    }
+  };
+
+  const handleDareSpin = async () => {
+    if (!card || dareSpinning) return;
+    setDareSpinning(true);
+    try {
+      const result = await spinDare(card.card_id);
+      setDareResult(result);
+      // Reflect wallet change immediately
+      if (typeof result.new_balance === 'number') {
+        setWallet((prev) => prev ? { ...prev, balance: result.new_balance! } : prev);
+      }
+      // Refresh card if a square was swapped or marked
+      if (result.outcome === 'swap_square' || result.outcome === 'mark_random') {
+        await loadGame();
+      }
+      // Update dare_clicks on the local card
+      setCard((prev) => prev ? { ...prev, dare_clicks: result.dare_clicks_used } : prev);
+    } catch (err: any) {
+      toast.error(err?.message || 'Dare spin failed. Please try again.');
+    } finally {
+      setDareSpinning(false);
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -366,6 +457,22 @@ const GameBoard: React.FC = () => {
               <Heart className="w-5 h-5 text-pink-400 fill-pink-400" />
               <span className="text-base font-bold text-white hidden sm:inline">Gr8Day Bingo</span>
             </div>
+            {playerNumber && (
+              <button
+                onClick={() => navigate('/profile')}
+                className="hidden sm:flex items-center gap-1 hover:opacity-80 transition-opacity"
+              >
+                {playerBadge && (
+                  <img
+                    src={`/badge-${playerBadge.badge_name.toLowerCase()}.png`}
+                    alt={playerBadge.badge_name}
+                    className="w-6 h-6 rounded-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
+                <span className="text-xs text-white/50 font-mono">GR8-{playerNumber}</span>
+              </button>
+            )}
           </div>
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="bg-amber-500/20 border border-amber-500/30 text-amber-300 px-3 py-1.5 rounded-full text-sm font-bold flex items-center gap-1.5">
@@ -393,14 +500,53 @@ const GameBoard: React.FC = () => {
             <Button
               size="sm"
               variant="outline"
+              onClick={() => navigate('/prize-history')}
+              className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+              title="Prize History"
+            >
+              <Trophy className="w-3.5 h-3.5 mr-0.5" />
+              <span className="hidden sm:inline">My Wins</span>
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
               onClick={handlePrintPdf}
               disabled={!card}
               className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
-              title="Print / Save as PDF"
+              title="Print my card as PDF"
             >
               <Printer className="w-3.5 h-3.5 mr-0.5" />
-              <span className="hidden sm:inline">Print PDF</span>
+              <span className="hidden sm:inline">Print Card</span>
             </Button>
+            {myTeam && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handlePrintTeamPdf}
+                className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+                title="Print all team cards (2×2 grid)"
+              >
+                <Users className="w-3.5 h-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Team Print</span>
+              </Button>
+            )}
+            {myTeam && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate('/trade')}
+                className="relative border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+                title="Trade a square with a teammate"
+              >
+                <Users className="w-3.5 h-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Trade</span>
+                {pendingTradeCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                    {pendingTradeCount}
+                  </span>
+                )}
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"
@@ -581,6 +727,8 @@ const GameBoard: React.FC = () => {
                             setCellProgress((prev) => ({ ...prev, [idx]: p }))
                           }
                           onUnmark={handleUnmark}
+                          onDare={handleDareSpin}
+                          dareUsed={(card.dare_clicks ?? 0) >= 1}
                         />
                       </div>
                     </div>
@@ -730,6 +878,11 @@ const GameBoard: React.FC = () => {
         </div>
       </div>
 
+      {/* Version */}
+      <div className="text-center pb-2">
+        <span className="text-xs text-slate-400 select-none">{APP_VERSION}</span>
+      </div>
+
       {/* Celebration */}
       <CelebrationOverlay
         show={showCelebration}
@@ -738,6 +891,17 @@ const GameBoard: React.FC = () => {
         onNewGame={handleStartNewGame}
         newGameLoading={actionLoading}
       />
+      {dareResult && (
+        <DareModal
+          result={dareResult}
+          onClose={() => setDareResult(null)}
+          onReferralFlow={() => {
+            setDareResult(null);
+            // Scroll to referral section
+            document.getElementById('referral-section')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+        />
+      )}
     </div>
   );
 };

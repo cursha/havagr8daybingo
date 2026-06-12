@@ -20,6 +20,8 @@ interface BingoCellProps {
   progress?: number;
   onProgressChange?: (index: number, newProgress: number) => void;
   onUnmark?: (index: number) => void;
+  onDare?: (index: number) => void;
+  dareUsed?: boolean;
 }
 
 const BingoCell: React.FC<BingoCellProps> = ({
@@ -34,6 +36,8 @@ const BingoCell: React.FC<BingoCellProps> = ({
   progress = 0,
   onProgressChange,
   onUnmark,
+  onDare,
+  dareUsed = false,
 }) => {
   const [pendingConfirm, setPendingConfirm] = useState(false);
   const [pendingPurchase, setPendingPurchase] = useState(false);
@@ -89,8 +93,14 @@ const BingoCell: React.FC<BingoCellProps> = ({
     setPendingPurchase(false);
   };
 
+  const isCentreSquare = cell.index === 12 && cell.is_free_space;
+
   const handleClick = () => {
     if (locked) return;
+    if (isCentreSquare) {
+      if (!dareUsed) onDare?.(cell.index);
+      return;
+    }
     if (cell.is_free_space) return;
     if (cell.is_purchasable && !isPurchased) {
       setPendingPurchase(true);
@@ -120,7 +130,7 @@ const BingoCell: React.FC<BingoCellProps> = ({
     <button
       ref={buttonRef}
       onClick={handleClick}
-      disabled={locked || isFree || cell.is_referral_free || (cell.is_purchasable && isPurchased)}
+      disabled={locked || (isFree && !isCentreSquare) || cell.is_referral_free || (cell.is_purchasable && isPurchased) || (isCentreSquare && dareUsed)}
       aria-label={
         isFree
           ? 'Free space'
@@ -137,7 +147,11 @@ const BingoCell: React.FC<BingoCellProps> = ({
         transition-all duration-200 ease-out
         overflow-hidden select-none
         ${locked && !isCompleted && !isFree ? 'opacity-50 grayscale cursor-not-allowed' : ''}
-        ${isFree
+        ${isCentreSquare
+          ? dareUsed
+            ? 'bg-slate-700 cursor-not-allowed opacity-60'
+            : 'bg-gradient-to-br from-yellow-900 via-amber-800 to-orange-900 cursor-pointer hover:from-yellow-800 hover:to-orange-800 active:scale-95'
+          : isFree
           ? prizeImageUrl
             ? 'cursor-default'
             : 'bg-gradient-to-br from-yellow-300 via-amber-400 to-orange-400 cursor-default'
@@ -258,8 +272,24 @@ const BingoCell: React.FC<BingoCellProps> = ({
         </div>
       ), document.body)}
 
-      {/* ===== FREE SPACE ===== */}
-      {isFree && (
+      {/* ===== CENTRE SQUARE — I DARE YA! ===== */}
+      {isCentreSquare && (
+        <div className="absolute inset-0 flex items-center justify-center">
+          <img
+            src={dareUsed ? '/dare-centre.png' : '/dare-centre.png'}
+            alt="I Dare Ya! Click & Commit"
+            className={`w-full h-full object-cover transition-all duration-300 ${dareUsed ? 'grayscale opacity-40' : 'hover:scale-105'}`}
+          />
+          {dareUsed && (
+            <span className="absolute bottom-1 text-[7px] sm:text-[9px] font-black text-white/70 uppercase tracking-widest bg-black/50 px-1 rounded">
+              Used
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* ===== OTHER FREE SPACE ===== */}
+      {isFree && !isCentreSquare && (
         <>
           {prizeImageUrl ? (
             <img

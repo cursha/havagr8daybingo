@@ -66,6 +66,26 @@ export interface CardData {
   purchased_cells: number[];
   referral_cells: number[];
   is_bingo: boolean;
+  dare_clicks: number;
+}
+
+export interface DareSpinResult {
+  outcome: 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing';
+  label: string;
+  amount?: number;
+  new_balance?: number;
+  old_deed?: string;
+  new_deed?: string;
+  swapped_cell_index?: number;
+  completed_cells?: number[];
+  is_bingo?: boolean;
+  dare_clicks_used: number;
+  dare_clicks_remaining: number;
+  message?: string;
+}
+
+export async function spinDare(cardId: number): Promise<DareSpinResult> {
+  return apiClient.post<DareSpinResult>('/game/dare-spin', { card_id: cardId });
 }
 
 export interface WinCondition {
@@ -106,11 +126,149 @@ export async function resetCard(): Promise<CardData> {
   return apiClient.post<CardData>('/game/reset-card', {});
 }
 
-export async function markCell(cardId: number, cellIndex: number): Promise<MarkCellResult> {
+export async function markCell(cardId: number, cellIndex: number, note?: string): Promise<MarkCellResult> {
   return apiClient.post<MarkCellResult>('/game/mark-cell', {
     card_id: cardId,
     cell_index: cellIndex,
+    ...(note ? { note } : {}),
   });
+}
+
+export interface CellMarkLogEntry {
+  id: number;
+  user_id: string;
+  card_id: number;
+  cell_index: number;
+  action: 'mark' | 'void';
+  note: string | null;
+  voided_by: string | null;
+  void_reason: string | null;
+  created_at: string;
+  users?: { username: string; email: string } | null;
+}
+
+export async function adminGetCellMarkLog(limit = 100): Promise<CellMarkLogEntry[]> {
+  const data = await apiClient.get<{ logs: CellMarkLogEntry[] }>(`/game/admin/cell-mark-log?limit=${limit}`);
+  return data.logs;
+}
+
+export async function adminVoidCell(cardId: number, cellIndex: number, reason: string): Promise<MarkCellResult> {
+  return apiClient.post<MarkCellResult>('/game/admin/void-cell', {
+    card_id: cardId,
+    cell_index: cellIndex,
+    reason,
+  });
+}
+
+export interface PrizeHistoryEntry {
+  week_year: string;
+  win_condition: string;
+  won_at: string;
+  claim: {
+    id: number;
+    week_year: string;
+    status: string;
+    full_name: string;
+    email: string;
+    created_at: string;
+  } | null;
+}
+
+export interface CountryOption { id: number; name: string; code: string; }
+export interface StateOption { id: number; name: string; code: string; }
+
+export async function getCountries(): Promise<CountryOption[]> {
+  const data = await apiClient.get<{ countries: CountryOption[] }>('/game/public/countries', { skipAuth: true } as any);
+  return data.countries;
+}
+
+export async function getStates(countryId: number): Promise<StateOption[]> {
+  const data = await apiClient.get<{ states: StateOption[] }>(`/game/public/states/${countryId}`, { skipAuth: true } as any);
+  return data.states;
+}
+
+export async function getMyPrizeHistory(): Promise<PrizeHistoryEntry[]> {
+  const data = await apiClient.get<{ history: PrizeHistoryEntry[] }>('/game/my-prize-history');
+  return data.history;
+}
+
+export interface PlayerBadge {
+  total_deeds: number;
+  badge_name: string;
+  badge_emoji: string;
+  next_badge_name: string | null;
+  next_badge_emoji: string | null;
+  deeds_to_next_badge: number | null;
+}
+
+export async function getMyProfile(): Promise<PlayerBadge> {
+  return apiClient.get<PlayerBadge>('/game/my-profile');
+}
+
+export interface TeamMember {
+  id: number;
+  user_id: string;
+  users: { id: string; player_number: number | null; first_name: string | null; last_name: string | null; username: string | null } | null;
+}
+
+export interface TeamItem {
+  id: number;
+  team_number: number;
+  team_name: string;
+  created_at: string;
+  captain: { id: string; player_number: number | null; first_name: string | null; last_name: string | null; username: string | null } | null;
+  team_members: TeamMember[];
+}
+
+export async function adminGetTeams(): Promise<TeamItem[]> {
+  const data = await apiClient.get<{ teams: TeamItem[] }>('/game/admin/teams');
+  return data.teams;
+}
+
+export async function adminCreateTeam(teamName: string, captainPlayerNumber?: number): Promise<void> {
+  await apiClient.post('/game/admin/teams', { team_name: teamName, captain_player_number: captainPlayerNumber });
+}
+
+export async function adminUpdateTeam(teamId: number, teamName?: string, captainPlayerNumber?: number | null): Promise<void> {
+  await apiClient.put(`/game/admin/teams/${teamId}`, { team_name: teamName, captain_player_number: captainPlayerNumber });
+}
+
+export async function adminDeleteTeam(teamId: number): Promise<void> {
+  await apiClient.delete(`/game/admin/teams/${teamId}`);
+}
+
+export async function adminAddTeamMember(teamId: number, playerNumber: number): Promise<void> {
+  await apiClient.post(`/game/admin/teams/${teamId}/members`, { player_number: playerNumber });
+}
+
+export async function adminRemoveTeamMember(teamId: number, userId: string): Promise<void> {
+  await apiClient.delete(`/game/admin/teams/${teamId}/members/${userId}`);
+}
+
+export interface MyTeamMember {
+  user_id: string;
+  player_number: number | null;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  card: CardData | null;
+}
+
+export interface MyTeamData {
+  id: number;
+  team_number: number;
+  team_name: string;
+  captain: { id: string; player_number: number | null; first_name: string | null; last_name: string | null } | null;
+  members: MyTeamMember[];
+  week_year: string;
+}
+
+export async function getMyTeam(): Promise<{ team: MyTeamData | null }> {
+  return apiClient.get<{ team: MyTeamData | null }>('/game/my-team');
+}
+
+export async function adminTriggerWeeklyReset(): Promise<{ sent: number; failed: number; week: string }> {
+  return apiClient.post('/weekly-reset', {});
 }
 
 export async function unmarkCell(cardId: number, cellIndex: number): Promise<MarkCellResult> {
@@ -320,6 +478,10 @@ export interface MemberItem {
   challenge_level: number | null;
   province_state: string | null;
   country: string | null;
+  city: string | null;
+  country_id: number | null;
+  state_id: number | null;
+  player_number: number | null;
   last_login: string | null;
   profile_completed: boolean;
 }
@@ -360,11 +522,50 @@ export async function registerProfile(payload: {
   first_name: string;
   last_name: string;
   email: string;
+  city?: string;
+  country_id?: number | '';
+  state_id?: number | '';
   province_state?: string;
   country?: string;
   challenge_level?: number | null;
 }): Promise<RegisterProfileResult> {
   return apiClient.post<RegisterProfileResult>('/registration/register', payload);
+}
+
+// ---------- Square Trades ----------
+export interface TradeOffer {
+  id: number;
+  week_year: string;
+  from_user_id: string;
+  to_user_id: string;
+  from_card_id: number;
+  to_card_id: number;
+  from_cell_index: number;
+  to_cell_index: number;
+  from_deed_text: string;
+  to_deed_text: string;
+  from_deed_id: number | null;
+  to_deed_id: number | null;
+  status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
+  created_at: string;
+  from_user?: { first_name: string | null; last_name: string | null; player_number: number | null };
+  to_user?: { first_name: string | null; last_name: string | null; player_number: number | null };
+}
+
+export async function getMyTrades(): Promise<{ trades: TradeOffer[] }> {
+  return apiClient.get<{ trades: TradeOffer[] }>('/game/my-team/trades');
+}
+
+export async function createTrade(payload: { to_user_id: string; from_cell_index: number; to_cell_index: number }): Promise<{ success: boolean; trade: TradeOffer }> {
+  return apiClient.post<{ success: boolean; trade: TradeOffer }>('/game/my-team/trades', payload);
+}
+
+export async function acceptTrade(id: number): Promise<{ success: boolean }> {
+  return apiClient.post<{ success: boolean }>(`/game/my-team/trades/${id}/accept`, {});
+}
+
+export async function rejectOrCancelTrade(id: number): Promise<{ success: boolean }> {
+  return apiClient.post<{ success: boolean }>(`/game/my-team/trades/${id}/reject`, {});
 }
 
 // Helper: Check if a cell is "completed" (marked, purchased, referral free, or free space)

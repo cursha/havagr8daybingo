@@ -4,6 +4,8 @@ import {
   DeedItem,
   PendingDeed,
   PrizeClaim,
+  CellMarkLogEntry,
+  TeamItem,
   adminVerify,
   getAdminConfig,
   updateAdminConfig,
@@ -20,6 +22,15 @@ import {
   updatePrizeClaimStatus,
   getAdminMembers,
   MemberItem,
+  adminGetCellMarkLog,
+  adminVoidCell,
+  adminTriggerWeeklyReset,
+  adminGetTeams,
+  adminCreateTeam,
+  adminUpdateTeam,
+  adminDeleteTeam,
+  adminAddTeamMember,
+  adminRemoveTeamMember,
 } from '@/lib/game-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -38,9 +49,13 @@ const WIN_CONDITIONS = [
   { id: 'fill_card', name: 'Fill the Card', description: 'Complete every square on the entire card' },
 ];
 
+const ADMIN_SESSION_KEY = 'admin_authenticated';
+
 const AdminPanel: React.FC = () => {
   const navigate = useNavigate();
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(
+    () => sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true'
+  );
   const [password, setPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -71,12 +86,36 @@ const AdminPanel: React.FC = () => {
   // Member list state
   const [members, setMembers] = useState<MemberItem[]>([]);
   const [memberChallengeFilter, setMemberChallengeFilter] = useState('all');
+  const [memberCountryFilter, setMemberCountryFilter] = useState('all');
+  const [memberStateFilter, setMemberStateFilter] = useState('all');
+
+  // Void cell state
+  const [markLogs, setMarkLogs] = useState<CellMarkLogEntry[]>([]);
+  const [voidCardId, setVoidCardId] = useState('');
+  const [voidCellIndex, setVoidCellIndex] = useState('');
+  const [voidReason, setVoidReason] = useState('');
+  const [voidLoading, setVoidLoading] = useState(false);
+
+  // Weekly reset state
+  const [weeklyResetLoading, setWeeklyResetLoading] = useState(false);
+
+  // Teams state
+  const [teams, setTeams] = useState<TeamItem[]>([]);
+  const [newTeamName, setNewTeamName] = useState('');
+  const [newTeamCaptain, setNewTeamCaptain] = useState('');
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [addMemberTeamId, setAddMemberTeamId] = useState<number | null>(null);
+  const [addMemberPN, setAddMemberPN] = useState('');
+  const [editingTeamId, setEditingTeamId] = useState<number | null>(null);
+  const [editTeamName, setEditTeamName] = useState('');
+  const [editTeamCaptain, setEditTeamCaptain] = useState('');
 
   const handleLogin = async () => {
     setAuthLoading(true);
     try {
       await adminVerify(password);
       setAuthenticated(true);
+      sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
       toast.success('Admin access granted');
     } catch {
       toast.error('Invalid password');
@@ -145,12 +184,32 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  const loadMarkLogs = async () => {
+    try {
+      const logs = await adminGetCellMarkLog(100);
+      setMarkLogs(logs);
+    } catch {
+      // silent
+    }
+  };
+
+  const loadTeams = async () => {
+    try {
+      const t = await adminGetTeams();
+      setTeams(t);
+    } catch {
+      // silent
+    }
+  };
+
   useEffect(() => {
     if (authenticated) {
       loadData();
       loadPendingDeeds('pending');
       loadPrizeClaims();
       loadMembers();
+      loadMarkLogs();
+      loadTeams();
     }
   }, [authenticated]);
 
@@ -159,6 +218,95 @@ const AdminPanel: React.FC = () => {
       loadPendingDeeds(pendingFilter);
     }
   }, [pendingFilter]);
+
+  const handleVoidCell = async () => {
+    const cardId = parseInt(voidCardId.trim());
+    const cellIndex = parseInt(voidCellIndex.trim());
+    if (isNaN(cardId) || isNaN(cellIndex)) {
+      toast.error('Card ID and cell index must be numbers.');
+      return;
+    }
+    if (!voidReason.trim()) {
+      toast.error('Please enter a reason for voiding this cell.');
+      return;
+    }
+    setVoidLoading(true);
+    try {
+      await adminVoidCell(cardId, cellIndex, voidReason.trim());
+      toast.success(`Cell ${cellIndex} on card ${cardId} voided.`);
+      setVoidCardId('');
+      setVoidCellIndex('');
+      setVoidReason('');
+      loadMarkLogs();
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to void cell.');
+    } finally {
+      setVoidLoading(false);
+    }
+  };
+
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) { toast.error('Team name is required.'); return; }
+    setTeamLoading(true);
+    try {
+      const cap = newTeamCaptain.trim() ? parseInt(newTeamCaptain) : undefined;
+      await adminCreateTeam(newTeamName.trim(), cap);
+      toast.success('Team created.');
+      setNewTeamName(''); setNewTeamCaptain('');
+      loadTeams();
+    } catch (err: any) { toast.error(err?.message || 'Failed to create team.'); }
+    finally { setTeamLoading(false); }
+  };
+
+  const handleUpdateTeam = async (teamId: number) => {
+    try {
+      const cap = editTeamCaptain.trim() ? parseInt(editTeamCaptain) : null;
+      await adminUpdateTeam(teamId, editTeamName.trim() || undefined, cap);
+      toast.success('Team updated.');
+      setEditingTeamId(null);
+      loadTeams();
+    } catch (err: any) { toast.error(err?.message || 'Failed to update team.'); }
+  };
+
+  const handleDeleteTeam = async (teamId: number) => {
+    if (!confirm('Delete this team? Members will be removed.')) return;
+    try {
+      await adminDeleteTeam(teamId);
+      toast.success('Team deleted.');
+      loadTeams();
+    } catch (err: any) { toast.error(err?.message || 'Failed to delete team.'); }
+  };
+
+  const handleAddMember = async (teamId: number) => {
+    const pn = parseInt(addMemberPN);
+    if (isNaN(pn)) { toast.error('Enter a valid player number.'); return; }
+    try {
+      await adminAddTeamMember(teamId, pn);
+      toast.success('Player added to team.');
+      setAddMemberTeamId(null); setAddMemberPN('');
+      loadTeams();
+    } catch (err: any) { toast.error(err?.message || 'Failed to add player.'); }
+  };
+
+  const handleRemoveMember = async (teamId: number, userId: string) => {
+    try {
+      await adminRemoveTeamMember(teamId, userId);
+      toast.success('Player removed.');
+      loadTeams();
+    } catch (err: any) { toast.error(err?.message || 'Failed to remove player.'); }
+  };
+
+  const handleWeeklyReset = async () => {
+    setWeeklyResetLoading(true);
+    try {
+      const res = await adminTriggerWeeklyReset();
+      toast.success(`New week emails sent: ${res.sent} delivered, ${res.failed} failed.`);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to send weekly emails.');
+    } finally {
+      setWeeklyResetLoading(false);
+    }
+  };
 
   const handleApprove = async (id: number) => {
     try {
@@ -445,21 +593,39 @@ const AdminPanel: React.FC = () => {
       const lvl = parseInt(memberChallengeFilter);
       result = result.filter((m) => m.challenge_level === lvl);
     }
+    if (memberCountryFilter !== 'all') {
+      result = result.filter((m) => (m.country ?? '').toLowerCase() === memberCountryFilter.toLowerCase());
+    }
+    if (memberStateFilter !== 'all') {
+      result = result.filter((m) => (m.province_state ?? '').toLowerCase() === memberStateFilter.toLowerCase());
+    }
     return result;
   };
+
+  const memberCountries = [...new Set(members.map((m) => m.country).filter(Boolean))].sort() as string[];
+  const memberStates = [...new Set(
+    members
+      .filter((m) => memberCountryFilter === 'all' || (m.country ?? '').toLowerCase() === memberCountryFilter.toLowerCase())
+      .map((m) => m.province_state)
+      .filter(Boolean)
+  )].sort() as string[];
 
   function handlePrintMembers() {
     const list = getFilteredMembers();
     const esc = (s: unknown) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const fmtDate = (d: string | null) => (d ? new Date(d).toLocaleDateString() : '—');
-    const filterDesc =
-      memberChallengeFilter === 'all' ? 'All members'
-      : memberChallengeFilter === 'none' ? 'No challenge level set'
-      : `Challenge level ${memberChallengeFilter}`;
+    const filterParts: string[] = [];
+    if (memberCountryFilter !== 'all') filterParts.push(memberCountryFilter);
+    if (memberStateFilter !== 'all') filterParts.push(memberStateFilter);
+    if (memberChallengeFilter === 'none') filterParts.push('No challenge level set');
+    else if (memberChallengeFilter !== 'all') filterParts.push(`Challenge level ${memberChallengeFilter}`);
+    const filterDesc = filterParts.length > 0 ? filterParts.join(' · ') : 'All members';
     const rows = list.map((m) => `
       <tr>
         <td>${esc(m.name) || '—'}</td>
         <td>${esc(m.email) || '—'}</td>
+        <td>${m.player_number ? `GR8-${m.player_number}` : '—'}</td>
+        <td>${esc(m.city) || '—'}</td>
         <td>${esc(m.province_state) || '—'}</td>
         <td>${esc(m.country) || '—'}</td>
         <td class="ctr">${m.challenge_level ?? '—'}</td>
@@ -483,7 +649,7 @@ const AdminPanel: React.FC = () => {
   <h1>Gr8Day Members</h1>
   <p class="meta">${list.length} member${list.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${filterDesc} &nbsp;·&nbsp; ${new Date().toLocaleDateString()}</p>
   <table>
-    <thead><tr><th>Name</th><th>Email</th><th>Province / State</th><th>Country</th><th>Challenge</th><th>Last Active</th></tr></thead>
+    <thead><tr><th>#</th><th>Name</th><th>Email</th><th>City</th><th>Province / State</th><th>Country</th><th>Challenge</th><th>Last Active</th></tr></thead>
     <tbody>${rows}</tbody>
   </table>
   <script>window.onload=function(){window.print();}</script>
@@ -577,6 +743,116 @@ const AdminPanel: React.FC = () => {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Teams */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Users className="w-5 h-5 text-indigo-500" />
+              Teams ({teams.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Create new team */}
+            <div className="border rounded-lg p-3 space-y-2 bg-slate-50">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide">New Team</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Input placeholder="Team name" value={newTeamName} onChange={(e) => setNewTeamName(e.target.value)} />
+                <Input placeholder="Captain player # (optional)" value={newTeamCaptain} onChange={(e) => setNewTeamCaptain(e.target.value)} />
+              </div>
+              <Button size="sm" onClick={handleCreateTeam} disabled={teamLoading} className="bg-indigo-600 hover:bg-indigo-700 text-white">
+                <Plus className="w-4 h-4 mr-1" /> Create Team
+              </Button>
+            </div>
+
+            {/* Team list */}
+            {teams.length === 0 ? (
+              <p className="text-sm text-slate-400 text-center py-4">No teams yet.</p>
+            ) : (
+              <div className="space-y-3">
+                {teams.map((team) => (
+                  <div key={team.id} className="border rounded-lg p-3 space-y-2">
+                    {editingTeamId === team.id ? (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-2 gap-2">
+                          <Input value={editTeamName} onChange={(e) => setEditTeamName(e.target.value)} placeholder="Team name" />
+                          <Input value={editTeamCaptain} onChange={(e) => setEditTeamCaptain(e.target.value)} placeholder="Captain player #" />
+                        </div>
+                        <div className="flex gap-2">
+                          <Button size="sm" onClick={() => handleUpdateTeam(team.id)} className="bg-emerald-600 hover:bg-emerald-700 text-white">
+                            <Save className="w-3.5 h-3.5 mr-1" /> Save
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => setEditingTeamId(null)}>Cancel</Button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex items-start justify-between gap-2">
+                        <div>
+                          <span className="font-mono text-xs text-slate-400 mr-2">T-{team.team_number}</span>
+                          <span className="font-semibold text-slate-800">{team.team_name}</span>
+                          {team.captain && (
+                            <span className="ml-2 text-xs text-slate-500">
+                              Captain: {team.captain.first_name ?? team.captain.username ?? '—'}
+                              {team.captain.player_number && <span className="ml-1 font-mono">(GR8-{team.captain.player_number})</span>}
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-1 shrink-0">
+                          <Button size="sm" variant="outline" onClick={() => {
+                            setEditingTeamId(team.id);
+                            setEditTeamName(team.team_name);
+                            setEditTeamCaptain(team.captain?.player_number?.toString() ?? '');
+                          }}>
+                            <Edit2 className="w-3.5 h-3.5" />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => handleDeleteTeam(team.id)} className="text-red-500 hover:text-red-700">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Members */}
+                    <div className="pl-1 space-y-1">
+                      {(team.team_members ?? []).map((m) => (
+                        <div key={m.id} className="flex items-center justify-between text-sm">
+                          <span className="text-slate-600">
+                            {m.users?.first_name ?? m.users?.username ?? m.user_id.slice(0, 8)}
+                            {m.users?.player_number && <span className="ml-1.5 font-mono text-xs text-slate-400">GR8-{m.users.player_number}</span>}
+                          </span>
+                          <Button size="sm" variant="ghost" onClick={() => handleRemoveMember(team.id, m.user_id)}
+                            className="h-6 px-2 text-red-400 hover:text-red-600">
+                            <X className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      ))}
+                      {(team.team_members ?? []).length < 4 && (
+                        addMemberTeamId === team.id ? (
+                          <div className="flex gap-2 mt-1">
+                            <Input className="h-7 text-xs" placeholder="Player #" value={addMemberPN}
+                              onChange={(e) => setAddMemberPN(e.target.value)} />
+                            <Button size="sm" className="h-7 text-xs bg-indigo-600 hover:bg-indigo-700 text-white"
+                              onClick={() => handleAddMember(team.id)}>Add</Button>
+                            <Button size="sm" variant="ghost" className="h-7 text-xs"
+                              onClick={() => { setAddMemberTeamId(null); setAddMemberPN(''); }}>Cancel</Button>
+                          </div>
+                        ) : (
+                          <button onClick={() => { setAddMemberTeamId(team.id); setAddMemberPN(''); }}
+                            className="text-xs text-indigo-500 hover:text-indigo-700 mt-1">
+                            + Add player ({4 - (team.team_members ?? []).length} spot{4 - (team.team_members ?? []).length !== 1 ? 's' : ''} left)
+                          </button>
+                        )
+                      )}
+                      {(team.team_members ?? []).length === 0 && addMemberTeamId !== team.id && (
+                        <p className="text-xs text-slate-400">No members yet.</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Member List */}
         <Card>
           <CardHeader>
@@ -585,7 +861,31 @@ const AdminPanel: React.FC = () => {
                 <Users className="w-5 h-5 text-sky-500" />
                 Members ({members.length})
               </span>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={memberCountryFilter} onValueChange={(v) => { setMemberCountryFilter(v); setMemberStateFilter('all'); }}>
+                  <SelectTrigger className="w-36 h-8 text-sm">
+                    <SelectValue placeholder="All countries" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All countries</SelectItem>
+                    {memberCountries.map((c) => (
+                      <SelectItem key={c} value={c}>{c}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {memberStates.length > 0 && (
+                  <Select value={memberStateFilter} onValueChange={setMemberStateFilter}>
+                    <SelectTrigger className="w-36 h-8 text-sm">
+                      <SelectValue placeholder="All states" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All states</SelectItem>
+                      {memberStates.map((s) => (
+                        <SelectItem key={s} value={s}>{s}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
                 <Select value={memberChallengeFilter} onValueChange={setMemberChallengeFilter}>
                   <SelectTrigger className="w-44 h-8 text-sm">
                     <SelectValue />
@@ -621,6 +921,7 @@ const AdminPanel: React.FC = () => {
                   <table className="w-full text-sm">
                     <thead className="bg-slate-50 sticky top-0">
                       <tr className="text-left text-xs text-slate-500 uppercase tracking-wide">
+                        <th className="px-3 py-2">#</th>
                         <th className="px-3 py-2">Name</th>
                         <th className="px-3 py-2">Email</th>
                         <th className="px-3 py-2">Location</th>
@@ -630,6 +931,9 @@ const AdminPanel: React.FC = () => {
                     <tbody className="divide-y">
                       {getFilteredMembers().map((m) => (
                         <tr key={m.id} className="hover:bg-slate-50">
+                          <td className="px-3 py-2 text-xs text-slate-400 font-mono whitespace-nowrap">
+                            {m.player_number ? `GR8-${m.player_number}` : '—'}
+                          </td>
                           <td className="px-3 py-2">
                             <span className="font-medium text-slate-800">{m.name || '—'}</span>
                             {m.role === 'admin' && (
@@ -640,13 +944,97 @@ const AdminPanel: React.FC = () => {
                             {m.email ? <a href={`mailto:${m.email}`} className="text-indigo-600 hover:underline">{m.email}</a> : '—'}
                           </td>
                           <td className="px-3 py-2 text-slate-600">
-                            {[m.province_state, m.country].filter(Boolean).join(', ') || '—'}
+                            {[m.city, m.province_state, m.country].filter(Boolean).join(', ') || '—'}
                           </td>
                           <td className="px-3 py-2 text-center">
                             {m.challenge_level != null ? (
                               <span className="text-xs bg-amber-50 text-amber-700 px-2 py-0.5 rounded font-semibold">{m.challenge_level}</span>
                             ) : <span className="text-slate-300">—</span>}
                           </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Void Cell */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <XCircle className="w-5 h-5 text-red-500" />
+              Void a Cell
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Remove a marked cell from a player's card. This cannot be undone and is logged for audit purposes.
+            </p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-600">Card ID</label>
+                <Input
+                  placeholder="e.g. 42"
+                  value={voidCardId}
+                  onChange={(e) => setVoidCardId(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1">
+                <label className="text-xs font-medium text-slate-600">Cell Index (0–24)</label>
+                <Input
+                  placeholder="e.g. 12"
+                  value={voidCellIndex}
+                  onChange={(e) => setVoidCellIndex(e.target.value)}
+                />
+              </div>
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-600">Reason (required)</label>
+              <Input
+                placeholder="e.g. Player admitted they didn't complete the deed"
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+              />
+            </div>
+            <Button
+              onClick={handleVoidCell}
+              disabled={voidLoading}
+              className="bg-red-600 hover:bg-red-700 text-white font-bold"
+            >
+              {voidLoading ? 'Voiding…' : 'Void Cell'}
+            </Button>
+
+            {markLogs.length > 0 && (
+              <div className="mt-4">
+                <p className="text-xs font-semibold text-slate-500 mb-2">Recent mark activity (last 100)</p>
+                <div className="max-h-64 overflow-y-auto border rounded-lg">
+                  <table className="w-full text-xs">
+                    <thead className="bg-slate-50 sticky top-0">
+                      <tr>
+                        <th className="px-2 py-1.5 text-left">When</th>
+                        <th className="px-2 py-1.5 text-left">Player</th>
+                        <th className="px-2 py-1.5 text-left">Card</th>
+                        <th className="px-2 py-1.5 text-left">Cell</th>
+                        <th className="px-2 py-1.5 text-left">Action</th>
+                        <th className="px-2 py-1.5 text-left">Note / Reason</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y">
+                      {markLogs.map((log) => (
+                        <tr key={log.id} className={log.action === 'void' ? 'bg-red-50' : 'hover:bg-slate-50'}>
+                          <td className="px-2 py-1.5 text-slate-500">{new Date(log.created_at).toLocaleString()}</td>
+                          <td className="px-2 py-1.5">{log.users?.username ?? log.user_id.slice(0, 8)}</td>
+                          <td className="px-2 py-1.5">{log.card_id}</td>
+                          <td className="px-2 py-1.5">{log.cell_index}</td>
+                          <td className="px-2 py-1.5">
+                            <span className={`font-semibold ${log.action === 'void' ? 'text-red-600' : 'text-emerald-600'}`}>
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="px-2 py-1.5 text-slate-500">{log.note ?? log.void_reason ?? '—'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -693,6 +1081,28 @@ const AdminPanel: React.FC = () => {
             )}
             <Button onClick={handleSaveConfig} className="bg-violet-600 hover:bg-violet-700 text-white">
               <Save className="w-4 h-4 mr-1" /> Save Game Mode
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Weekly Reset */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Mail className="w-5 h-5 text-sky-500" />
+              Weekly New Card Email
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-slate-500">
+              Sends a "your new card is ready" email to all verified players. This runs automatically every Monday at 8am UTC. Use the button below to send it manually at any time.
+            </p>
+            <Button
+              onClick={handleWeeklyReset}
+              disabled={weeklyResetLoading}
+              className="bg-sky-600 hover:bg-sky-700 text-white font-bold"
+            >
+              {weeklyResetLoading ? 'Sending…' : 'Send Now to All Players'}
             </Button>
           </CardContent>
         </Card>

@@ -20,6 +20,48 @@ interface Cell {
   quantity: number
 }
 
+// ── Security: strip secret fields before sending cells to client ─────────────
+// is_secret and secret_reward must never be exposed until the square is revealed.
+function sanitizeCells(cells: Cell[], completedCells: number[]): unknown[] {
+  return cells.map((c) => {
+    const revealed = c.secret_revealed === true || completedCells.includes(c.index)
+    const { is_secret, secret_reward, secret_revealed, ...rest } = c
+    return {
+      ...rest,
+      // Only tell the client a square is secret AFTER it has been marked
+      ...(is_secret && revealed ? { is_secret: true, secret_reward, secret_revealed: true } : {}),
+    }
+  })
+}
+
+// ── Badge System ─────────────────────────────────────────────────────────────
+function getBadge(totalDeeds: number): { name: string; emoji: string; next_name: string | null; next_emoji: string | null; deeds_to_next: number | null } {
+  const tiers = [
+    { min: 0,   name: 'Newcomer',  emoji: '🌱' },
+    { min: 5,   name: 'Starter',   emoji: '⭐' },
+    { min: 10,  name: 'Builder',   emoji: '🔨' },
+    { min: 25,  name: 'Champion',  emoji: '🏆' },
+    { min: 50,  name: 'Hero',      emoji: '🦸' },
+    { min: 75,  name: 'Legend',    emoji: '🌟' },
+    { min: 100, name: 'Expert',    emoji: '👑' },
+  ]
+  let current = tiers[0]
+  let nextTier: typeof tiers[0] | null = tiers[1]
+  for (let i = 0; i < tiers.length; i++) {
+    if (totalDeeds >= tiers[i].min) {
+      current = tiers[i]
+      nextTier = tiers[i + 1] ?? null
+    }
+  }
+  return {
+    name: current.name,
+    emoji: current.emoji,
+    next_name: nextTier?.name ?? null,
+    next_emoji: nextTier?.emoji ?? null,
+    deeds_to_next: nextTier ? nextTier.min - totalDeeds : null,
+  }
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function getCurrentWeekYear(): string {
   const now = new Date()
@@ -197,15 +239,17 @@ Deno.serve(async (req: Request) => {
           }).eq('id', existing.id)
         }
 
+        const completedIdx = parseJsonArr(existing.completed_cells) as number[]
         return jsonResponse({
           card_id: existing.id,
           week_year: existing.week_year,
-          cells,
+          cells: sanitizeCells(cells, completedIdx),
           win_condition: existing.win_condition,
-          completed_cells: parseJsonArr(existing.completed_cells),
+          completed_cells: completedIdx,
           purchased_cells: parseJsonArr(existing.purchased_cells),
           referral_cells: parseJsonArr(existing.referral_cells),
           is_bingo: existing.is_bingo ?? false,
+          dare_clicks: existing.dare_clicks ?? 0,
         })
       }
 
@@ -317,7 +361,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({
         card_id: newCard.id,
         week_year: newCard.week_year,
-        cells,
+        cells: sanitizeCells(cells, []),
         win_condition: adminWinCondition,
         completed_cells: [],
         purchased_cells: [],
@@ -331,6 +375,7 @@ Deno.serve(async (req: Request) => {
       const user = requireAuth(authUser)
       const body = await req.json()
       const { card_id, cell_index } = body
+      const markNote: string | null = body.note ? String(body.note).trim().slice(0, 500) || null : null
 
       const { data: card } = await supabase
         .from('player_cards').select('*')
@@ -386,6 +431,15 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq('id', card_id)
 
+      // Log the mark action
+      await supabase.from('cell_mark_log').insert({
+        user_id: user.sub,
+        card_id,
+        cell_index,
+        action: 'mark',
+        note: markNote,
+      })
+
       // First time the card reaches Bingo: congratulate by email (best-effort).
       if (isBingo && !card.is_bingo && user.email) {
         const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
@@ -418,9 +472,9 @@ Deno.serve(async (req: Request) => {
         success: true,
         card_id: card.id,
         week_year: card.week_year,
-        cells: JSON.parse(card.card_data),
+        cells: sanitizeCells(JSON.parse(card.card_data), []),
         win_condition: card.win_condition,
-        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false,
+        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false, dare_clicks: 0,
       })
     }
 
@@ -619,6 +673,29 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // ── GET /public/countries ─────────────────────────────────────────────────
+    if (method === 'GET' && path === '/public/countries') {
+      const { data } = await supabase
+        .from('countries')
+        .select('id, name, code')
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true })
+      return jsonResponse({ countries: data ?? [] })
+    }
+
+    // ── GET /public/states/:countryId ─────────────────────────────────────────
+    const statesMatch = matchPath('/public/states/:countryId', path)
+    if (method === 'GET' && statesMatch) {
+      const countryId = parseInt(statesMatch.countryId)
+      if (isNaN(countryId)) return errorResponse('Invalid country id', 400)
+      const { data } = await supabase
+        .from('states')
+        .select('id, name, code')
+        .eq('country_id', countryId)
+        .order('name', { ascending: true })
+      return jsonResponse({ states: data ?? [] })
+    }
+
     // ── GET /public/prize ─────────────────────────────────────────────────────
     if (method === 'GET' && path === '/public/prize') {
       const { data: rows } = await supabase
@@ -635,7 +712,7 @@ Deno.serve(async (req: Request) => {
       const { data: cfg } = await supabase
         .from('game_configs').select('config_value').eq('config_key', 'admin_password').maybeSingle()
       if (!cfg || cfg.config_value !== body.password) {
-        return errorResponse('Invalid admin password', 401)
+        return errorResponse('Invalid admin password', 403)
       }
       return jsonResponse({ success: true })
     }
@@ -667,12 +744,136 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
+    // ── GET /admin/teams ──────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/teams') {
+      requireAdmin(authUser)
+      const { data, error } = await supabase
+        .from('teams')
+        .select(`
+          id, team_number, team_name, created_at,
+          captain:users!captain_user_id(id, player_number, first_name, last_name, username),
+          team_members(id, user_id, users(id, player_number, first_name, last_name, username))
+        `)
+        .order('team_number', { ascending: true })
+      if (error) throw error
+      return jsonResponse({ teams: data ?? [] })
+    }
+
+    // ── POST /admin/teams ─────────────────────────────────────────────────────
+    if (method === 'POST' && path === '/admin/teams') {
+      requireAdmin(authUser)
+      const body = await req.json()
+      const teamName = String(body.team_name ?? '').trim()
+      if (!teamName) return errorResponse('team_name is required', 400)
+
+      // Resolve captain by player_number if provided
+      let captainUserId: string | null = null
+      if (body.captain_player_number) {
+        const pn = parseInt(body.captain_player_number)
+        const { data: cap } = await supabase.from('users').select('id').eq('player_number', pn).maybeSingle()
+        captainUserId = cap?.id ?? null
+      }
+
+      const { data: team, error } = await supabase
+        .from('teams')
+        .insert({ team_name: teamName, captain_user_id: captainUserId })
+        .select()
+        .single()
+      if (error) throw error
+
+      // Auto-add captain as a member
+      if (captainUserId) {
+        await supabase.from('team_members')
+          .upsert({ team_id: team.id, user_id: captainUserId }, { onConflict: 'user_id' })
+      }
+
+      return jsonResponse({ success: true, team })
+    }
+
+    // ── PUT /admin/teams/:id ──────────────────────────────────────────────────
+    const teamEditMatch = matchPath('/admin/teams/:id', path)
+    if (method === 'PUT' && teamEditMatch) {
+      requireAdmin(authUser)
+      const teamId = parseInt(teamEditMatch.id)
+      const body = await req.json()
+      const teamName = body.team_name != null ? String(body.team_name).trim() : undefined
+
+      let captainUserId: string | null | undefined = undefined
+      if (body.captain_player_number !== undefined) {
+        if (!body.captain_player_number) {
+          captainUserId = null
+        } else {
+          const pn = parseInt(body.captain_player_number)
+          const { data: cap } = await supabase.from('users').select('id').eq('player_number', pn).maybeSingle()
+          captainUserId = cap?.id ?? null
+        }
+      }
+
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (teamName !== undefined) updates.team_name = teamName
+      if (captainUserId !== undefined) {
+        updates.captain_user_id = captainUserId
+        if (captainUserId) {
+          await supabase.from('team_members')
+            .upsert({ team_id: teamId, user_id: captainUserId }, { onConflict: 'user_id' })
+        }
+      }
+
+      await supabase.from('teams').update(updates).eq('id', teamId)
+      return jsonResponse({ success: true })
+    }
+
+    // ── DELETE /admin/teams/:id ───────────────────────────────────────────────
+    const teamDeleteMatch = matchPath('/admin/teams/:id', path)
+    if (method === 'DELETE' && teamDeleteMatch) {
+      requireAdmin(authUser)
+      const teamId = parseInt(teamDeleteMatch.id)
+      await supabase.from('teams').delete().eq('id', teamId)
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /admin/teams/:id/members ─────────────────────────────────────────
+    const teamMemberMatch = matchPath('/admin/teams/:id/members', path)
+    if (method === 'POST' && teamMemberMatch) {
+      requireAdmin(authUser)
+      const teamId = parseInt(teamMemberMatch.id)
+      const body = await req.json()
+      const pn = parseInt(body.player_number)
+      if (isNaN(pn)) return errorResponse('player_number is required', 400)
+
+      const { data: player } = await supabase.from('users').select('id').eq('player_number', pn).maybeSingle()
+      if (!player) return errorResponse(`No player found with number ${pn}`, 404)
+
+      // Check team size limit
+      const { count } = await supabase.from('team_members')
+        .select('id', { count: 'exact', head: true }).eq('team_id', teamId)
+      if ((count ?? 0) >= 4) return errorResponse('Teams are limited to 4 players.', 400)
+
+      // Check player isn't already on a team
+      const { data: existing } = await supabase.from('team_members')
+        .select('team_id').eq('user_id', player.id).maybeSingle()
+      if (existing) return errorResponse('This player is already on a team.', 400)
+
+      await supabase.from('team_members').insert({ team_id: teamId, user_id: player.id })
+      return jsonResponse({ success: true })
+    }
+
+    // ── DELETE /admin/teams/:id/members/:userId ───────────────────────────────
+    const teamMemberDeleteMatch = matchPath('/admin/teams/:id/members/:userId', path)
+    if (method === 'DELETE' && teamMemberDeleteMatch) {
+      requireAdmin(authUser)
+      const teamId = parseInt(teamMemberDeleteMatch.id)
+      const userId = teamMemberDeleteMatch.userId
+      await supabase.from('team_members').delete().eq('team_id', teamId).eq('user_id', userId)
+      return jsonResponse({ success: true })
+    }
+
     // ── GET /admin/members ────────────────────────────────────────────────────
     if (method === 'GET' && path === '/admin/members') {
       const { data } = await supabase
         .from('users')
-        .select('id, email, username, name, first_name, last_name, role, challenge_level, province_state, country, last_login, profile_completed')
-        .order('last_login', { ascending: false })
+        .select('id, email, username, name, first_name, last_name, role, challenge_level, province_state, country, city, country_id, state_id, player_number, last_login, profile_completed')
+        .order('player_number', { ascending: true })
       return jsonResponse({
         members: (data ?? []).map((u) => ({
           id: u.id,
@@ -685,6 +886,10 @@ Deno.serve(async (req: Request) => {
           challenge_level: u.challenge_level ?? null,
           province_state: u.province_state ?? null,
           country: u.country ?? null,
+          city: u.city ?? null,
+          country_id: u.country_id ?? null,
+          state_id: u.state_id ?? null,
+          player_number: u.player_number ?? null,
           last_login: u.last_login ?? null,
           profile_completed: !!u.profile_completed,
         })),
@@ -828,6 +1033,38 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, message: 'Thanks! Your deed suggestion was submitted and is awaiting admin approval.', id: data.id })
     }
 
+    // ── GET /my-prize-history ─────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-prize-history') {
+      const user = requireAuth(authUser)
+
+      // All winning cards for this player
+      const { data: winningCards } = await supabase
+        .from('player_cards')
+        .select('id, week_year, win_condition, updated_at')
+        .eq('user_id', user.sub)
+        .eq('is_bingo', true)
+        .order('week_year', { ascending: false })
+
+      // All prize claims for this player
+      const { data: claims } = await supabase
+        .from('prize_claims')
+        .select('id, week_year, status, full_name, email, created_at')
+        .eq('user_id', user.sub)
+        .order('created_at', { ascending: false })
+
+      const claimsByWeek: Record<string, typeof claims[0]> = {}
+      for (const c of (claims ?? [])) claimsByWeek[c.week_year] = c
+
+      const history = (winningCards ?? []).map((card) => ({
+        week_year: card.week_year,
+        win_condition: card.win_condition,
+        won_at: card.updated_at,
+        claim: claimsByWeek[card.week_year] ?? null,
+      }))
+
+      return jsonResponse({ history })
+    }
+
     // ── GET /my-suggestions ───────────────────────────────────────────────────
     if (method === 'GET' && path === '/my-suggestions') {
       const user = requireAuth(authUser)
@@ -929,6 +1166,59 @@ Deno.serve(async (req: Request) => {
       }).eq('id', card_id)
 
       return jsonResponse({ success: true, completed_cells: updatedCompleted, is_bingo: isBingo })
+    }
+
+    // ── POST /admin/void-cell ─────────────────────────────────────────────────
+    if (method === 'POST' && path === '/admin/void-cell') {
+      requireAdmin(authUser)
+      const body = await req.json()
+      const { card_id, cell_index, reason } = body
+      if (card_id == null || cell_index == null) return errorResponse('card_id and cell_index are required', 400)
+      const voidReason = reason ? String(reason).trim().slice(0, 500) : null
+
+      const { data: card } = await supabase
+        .from('player_cards').select('*').eq('id', card_id).maybeSingle()
+      if (!card) return errorResponse('Card not found', 404)
+
+      const completed = parseJsonArr(card.completed_cells)
+      if (!completed.includes(cell_index)) return errorResponse('Cell is not marked', 400)
+
+      const updatedCompleted = completed.filter((i: number) => i !== cell_index)
+      const purchased = parseJsonArr(card.purchased_cells)
+      const referral = parseJsonArr(card.referral_cells)
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+      const isBingo = checkBingo(allCompleted, card.win_condition)
+
+      await supabase.from('player_cards').update({
+        completed_cells: JSON.stringify(updatedCompleted),
+        is_bingo: isBingo,
+        updated_at: new Date().toISOString(),
+      }).eq('id', card_id)
+
+      await supabase.from('cell_mark_log').insert({
+        user_id: card.user_id,
+        card_id,
+        cell_index,
+        action: 'void',
+        voided_by: authUser!.sub,
+        void_reason: voidReason,
+      })
+
+      return jsonResponse({ success: true, completed_cells: updatedCompleted, is_bingo: isBingo })
+    }
+
+    // ── GET /admin/cell-mark-log ──────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/cell-mark-log') {
+      requireAdmin(authUser)
+      const limitParam = parseInt(url.searchParams.get('limit') ?? '100')
+      const limit = Math.min(Math.max(1, limitParam), 500)
+      const { data, error } = await supabase
+        .from('cell_mark_log')
+        .select('*, users(username, email)')
+        .order('created_at', { ascending: false })
+        .limit(limit)
+      if (error) throw error
+      return jsonResponse({ logs: data ?? [] })
     }
 
     // ── POST /wallet/create-payment-intent ───────────────────────────────────
@@ -1179,6 +1469,656 @@ Deno.serve(async (req: Request) => {
         .eq('id', parseInt(claimMatch.id))
       if (error) throw error
       return jsonResponse({ success: true })
+    }
+
+    // ── GET /my-team ─────────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-team') {
+      const user = requireAuth(authUser)
+      const weekYear = getCurrentWeekYear()
+
+      // Find the team this player belongs to
+      const { data: memberRow } = await supabase
+        .from('team_members')
+        .select('team_id')
+        .eq('user_id', user.sub)
+        .maybeSingle()
+
+      if (!memberRow) return jsonResponse({ team: null })
+
+      // Get team info + all members
+      const { data: team, error: teamError } = await supabase
+        .from('teams')
+        .select(`
+          id, team_number, team_name,
+          captain:users!captain_user_id(id, player_number, first_name, last_name, username),
+          team_members(
+            id, user_id,
+            users(id, player_number, first_name, last_name, username)
+          )
+        `)
+        .eq('id', memberRow.team_id)
+        .single()
+      if (teamError) throw teamError
+
+      // Fetch current-week card for each member
+      const memberUserIds = (team.team_members ?? []).map((m: any) => m.user_id)
+      const { data: cards } = await supabase
+        .from('player_cards')
+        .select('id, user_id, week_year, cells, win_condition, completed_cells, purchased_cells, referral_cells, is_bingo')
+        .eq('week_year', weekYear)
+        .in('user_id', memberUserIds)
+
+      const cardsByUser: Record<string, any> = {}
+      for (const c of (cards ?? [])) cardsByUser[c.user_id] = c
+
+      const members = (team.team_members ?? []).map((m: any) => ({
+        user_id: m.user_id,
+        player_number: m.users?.player_number ?? null,
+        first_name: m.users?.first_name ?? null,
+        last_name: m.users?.last_name ?? null,
+        username: m.users?.username ?? null,
+        card: cardsByUser[m.user_id] ?? null,
+      }))
+
+      return jsonResponse({
+        team: {
+          id: team.id,
+          team_number: team.team_number,
+          team_name: team.team_name,
+          captain: team.captain,
+          members,
+          week_year: weekYear,
+        },
+      })
+    }
+
+    // ── GET /my-team/trades ───────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-team/trades') {
+      const user = requireAuth(authUser)
+      const weekYear = getCurrentWeekYear()
+
+      const { data: trades, error: tradesErr } = await supabase
+        .from('square_trades')
+        .select('*')
+        .or(`from_user_id.eq.${user.sub},to_user_id.eq.${user.sub}`)
+        .eq('week_year', weekYear)
+        .order('created_at', { ascending: false })
+      if (tradesErr) throw tradesErr
+
+      // Collect unique user IDs to join
+      const userIds = new Set<string>()
+      for (const t of trades ?? []) {
+        userIds.add(t.from_user_id)
+        userIds.add(t.to_user_id)
+      }
+      const { data: userRows } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, player_number')
+        .in('id', [...userIds])
+      const usersById: Record<string, { first_name: string | null; last_name: string | null; player_number: number | null }> = {}
+      for (const u of userRows ?? []) usersById[u.id] = { first_name: u.first_name, last_name: u.last_name, player_number: u.player_number }
+
+      const enriched = (trades ?? []).map((t) => ({
+        ...t,
+        from_user: usersById[t.from_user_id] ?? null,
+        to_user: usersById[t.to_user_id] ?? null,
+      }))
+
+      return jsonResponse({ trades: enriched })
+    }
+
+    // ── POST /my-team/trades (create offer) ───────────────────────────────────
+    if (method === 'POST' && path === '/my-team/trades') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { to_user_id, from_cell_index, to_cell_index } = body
+      if (!to_user_id || from_cell_index == null || to_cell_index == null) {
+        return errorResponse('to_user_id, from_cell_index, and to_cell_index are required', 400)
+      }
+      if (to_user_id === user.sub) return errorResponse('You cannot trade with yourself', 400)
+
+      const weekYear = getCurrentWeekYear()
+
+      // Check user is on a team
+      const { data: fromMember } = await supabase
+        .from('team_members').select('team_id').eq('user_id', user.sub).maybeSingle()
+      if (!fromMember) return errorResponse('You are not on a team', 400)
+
+      // Check to_user is on the same team
+      const { data: toMember } = await supabase
+        .from('team_members').select('team_id').eq('user_id', to_user_id).maybeSingle()
+      if (!toMember || toMember.team_id !== fromMember.team_id) {
+        return errorResponse('That player is not on your team', 400)
+      }
+
+      // Check no active pending outgoing trade this week
+      const { data: existingPending } = await supabase
+        .from('square_trades')
+        .select('id')
+        .eq('from_user_id', user.sub)
+        .eq('week_year', weekYear)
+        .eq('status', 'pending')
+        .maybeSingle()
+      if (existingPending) return errorResponse('You already have an active pending trade offer this week', 400)
+
+      // Count completed trades for user this week (accepted, either from or to)
+      const { count: completedCount } = await supabase
+        .from('square_trades')
+        .select('id', { count: 'exact', head: true })
+        .eq('week_year', weekYear)
+        .eq('status', 'accepted')
+        .or(`from_user_id.eq.${user.sub},to_user_id.eq.${user.sub}`)
+      if ((completedCount ?? 0) >= 1) return errorResponse('Trade limit reached for this week', 400)
+
+      // Load from_card
+      const { data: fromCard } = await supabase
+        .from('player_cards').select('*').eq('user_id', user.sub).eq('week_year', weekYear).maybeSingle()
+      if (!fromCard) return errorResponse('You do not have a card this week', 400)
+
+      // Load to_card
+      const { data: toCard } = await supabase
+        .from('player_cards').select('*').eq('user_id', to_user_id).eq('week_year', weekYear).maybeSingle()
+      if (!toCard) return errorResponse('That player does not have a card this week', 400)
+
+      const fromCells: Cell[] = JSON.parse(fromCard.card_data)
+      const toCells: Cell[] = JSON.parse(toCard.card_data)
+
+      const fromCell = fromCells[from_cell_index]
+      const toCell = toCells[to_cell_index]
+
+      if (!fromCell) return errorResponse('Invalid from_cell_index', 400)
+      if (!toCell) return errorResponse('Invalid to_cell_index', 400)
+
+      // Validate from_cell
+      const fromCompleted = parseJsonArr(fromCard.completed_cells)
+      const fromPurchased = parseJsonArr(fromCard.purchased_cells)
+      const fromReferral = parseJsonArr(fromCard.referral_cells)
+      if (fromCell.is_free_space) return errorResponse('Cannot trade a free space', 400)
+      if (fromPurchased.includes(from_cell_index)) return errorResponse('Cannot trade a purchased square', 400)
+      if (fromReferral.includes(from_cell_index)) return errorResponse('Cannot trade a referral square', 400)
+      if (fromCompleted.includes(from_cell_index)) return errorResponse('Cannot trade a completed square', 400)
+
+      // Validate to_cell
+      const toCompleted = parseJsonArr(toCard.completed_cells)
+      const toPurchased = parseJsonArr(toCard.purchased_cells)
+      const toReferral = parseJsonArr(toCard.referral_cells)
+      if (toCell.is_free_space) return errorResponse('Cannot trade a free space', 400)
+      if (toPurchased.includes(to_cell_index)) return errorResponse('Cannot trade a purchased square', 400)
+      if (toReferral.includes(to_cell_index)) return errorResponse('Cannot trade a referral square', 400)
+      if (toCompleted.includes(to_cell_index)) return errorResponse('Cannot trade a completed square', 400)
+
+      const { data: trade, error: tradeErr } = await supabase
+        .from('square_trades')
+        .insert({
+          week_year: weekYear,
+          from_user_id: user.sub,
+          to_user_id,
+          from_card_id: fromCard.id,
+          to_card_id: toCard.id,
+          from_cell_index,
+          to_cell_index,
+          from_deed_text: fromCell.deed_text,
+          to_deed_text: toCell.deed_text,
+          from_deed_id: fromCell.deed_id ?? null,
+          to_deed_id: toCell.deed_id ?? null,
+          status: 'pending',
+        })
+        .select()
+        .single()
+      if (tradeErr) throw tradeErr
+
+      return jsonResponse({ success: true, trade })
+    }
+
+    // ── POST /my-team/trades/:id/accept ───────────────────────────────────────
+    const tradeAcceptMatch = path.match(/^\/my-team\/trades\/(\d+)\/accept$/)
+    if (method === 'POST' && tradeAcceptMatch) {
+      const user = requireAuth(authUser)
+      const tradeId = parseInt(tradeAcceptMatch[1])
+
+      const { data: trade } = await supabase
+        .from('square_trades').select('*').eq('id', tradeId).maybeSingle()
+      if (!trade) return errorResponse('Trade not found', 404)
+      if (trade.to_user_id !== user.sub) return errorResponse('Only the recipient can accept this trade', 403)
+      if (trade.status !== 'pending') return errorResponse('Trade is no longer pending', 400)
+
+      const expiresAt = new Date(trade.created_at).getTime() + 48 * 60 * 60 * 1000
+      if (Date.now() > expiresAt) {
+        await supabase.from('square_trades').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', tradeId)
+        return errorResponse('Trade offer has expired', 400)
+      }
+
+      // Load both cards
+      const { data: fromCard } = await supabase
+        .from('player_cards').select('*').eq('id', trade.from_card_id).maybeSingle()
+      const { data: toCard } = await supabase
+        .from('player_cards').select('*').eq('id', trade.to_card_id).maybeSingle()
+      if (!fromCard || !toCard) return errorResponse('One or both cards not found', 404)
+
+      // Re-validate cells are still uncompleted
+      const fromCompleted = parseJsonArr(fromCard.completed_cells)
+      const toCompleted = parseJsonArr(toCard.completed_cells)
+      if (fromCompleted.includes(trade.from_cell_index)) {
+        return errorResponse('The offerer\'s square has already been completed', 400)
+      }
+      if (toCompleted.includes(trade.to_cell_index)) {
+        return errorResponse('Your square has already been completed', 400)
+      }
+
+      // Execute swap in JS
+      const fromCells: Cell[] = JSON.parse(fromCard.card_data)
+      const toCells: Cell[] = JSON.parse(toCard.card_data)
+
+      const fromCell = { ...fromCells[trade.from_cell_index] }
+      const toCell = { ...toCells[trade.to_cell_index] }
+
+      // Swap deed_text and deed_id, keep index and other flags
+      fromCells[trade.from_cell_index] = {
+        ...fromCell,
+        deed_text: toCell.deed_text,
+        deed_id: toCell.deed_id,
+        deed_text_long: toCell.deed_text_long ?? null,
+        quantity: toCell.quantity ?? 1,
+      }
+      toCells[trade.to_cell_index] = {
+        ...toCell,
+        deed_text: fromCell.deed_text,
+        deed_id: fromCell.deed_id,
+        deed_text_long: fromCell.deed_text_long ?? null,
+        quantity: fromCell.quantity ?? 1,
+      }
+
+      // Update both player_cards
+      await supabase.from('player_cards')
+        .update({ card_data: JSON.stringify(fromCells), updated_at: new Date().toISOString() })
+        .eq('id', fromCard.id)
+      await supabase.from('player_cards')
+        .update({ card_data: JSON.stringify(toCells), updated_at: new Date().toISOString() })
+        .eq('id', toCard.id)
+
+      // Update trade status
+      await supabase.from('square_trades')
+        .update({ status: 'accepted', updated_at: new Date().toISOString() })
+        .eq('id', tradeId)
+
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /my-team/trades/:id/reject ───────────────────────────────────────
+    const tradeRejectMatch = path.match(/^\/my-team\/trades\/(\d+)\/reject$/)
+    if (method === 'POST' && tradeRejectMatch) {
+      const user = requireAuth(authUser)
+      const tradeId = parseInt(tradeRejectMatch[1])
+
+      const { data: trade } = await supabase
+        .from('square_trades').select('*').eq('id', tradeId).maybeSingle()
+      if (!trade) return errorResponse('Trade not found', 404)
+      if (trade.from_user_id !== user.sub && trade.to_user_id !== user.sub) {
+        return errorResponse('You are not part of this trade', 403)
+      }
+      if (trade.status !== 'pending') return errorResponse('Trade is no longer pending', 400)
+
+      const newStatus = trade.from_user_id === user.sub ? 'cancelled' : 'rejected'
+      await supabase.from('square_trades')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', tradeId)
+
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /dare-spin ───────────────────────────────────────────────────────
+    // Spin the Dare wheel for the current player's active card.
+    //
+    // Confirmed design rules (hardcoded, not admin-toggleable):
+    //   1. No negative balance — ever. If remove_funds would take the wallet
+    //      below $0.00, re-roll until a non-remove_funds outcome is selected.
+    //   2. swap_square always un-marks the swapped cell. The player must complete
+    //      the new deed before the square counts.
+    //   3. Dare clicks are per-week per-card. dare_clicks lives on player_cards
+    //      which has one row per player per week, so it resets automatically when
+    //      a new card is generated.
+    if (method === 'POST' && path === '/dare-spin') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { card_id } = body
+
+      // Load the player's card
+      const { data: card } = await supabase
+        .from('player_cards').select('*')
+        .eq('id', card_id).eq('user_id', user.sub).maybeSingle()
+      if (!card) return errorResponse('Card not found', 404)
+
+      // Hardcoded: 1 dare spin per card per week (resets automatically with new card)
+      const maxSpins = 1
+      const dareClicks: number = card.dare_clicks ?? 0
+      if (dareClicks >= maxSpins) {
+        return errorResponse('You have already used your Dare Spin for this week', 400)
+      }
+
+      // Check dare_enabled
+      const { data: enabledCfg } = await supabase
+        .from('game_configs').select('config_value')
+        .eq('config_key', 'dare_enabled').maybeSingle()
+      if (enabledCfg?.config_value === 'false') {
+        return errorResponse('Dare Spin is currently disabled', 400)
+      }
+
+      // ── Load outcome weights from game_configs ──────────────────────────────
+      // Keys that start with dare_outcome_* each have format "weight:amount"
+      const { data: cfgRows } = await supabase
+        .from('game_configs').select('config_key, config_value')
+        .like('config_key', 'dare_outcome_%')
+
+      type OutcomeType = 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing'
+      interface Outcome { type: OutcomeType; label: string; weight: number; amount: number }
+
+      const typeMap: Record<string, OutcomeType> = {
+        'dare_outcome_add_funds_2':  'add_funds',
+        'dare_outcome_add_funds_1':  'add_funds',
+        'dare_outcome_add_funds_50': 'add_funds',
+        'dare_outcome_remove_funds': 'remove_funds',
+        'dare_outcome_refer_player': 'refer_player',
+        'dare_outcome_swap_square':  'swap_square',
+        'dare_outcome_nothing':      'nothing',
+      }
+      const labelMap: Record<string, string> = {
+        'dare_outcome_add_funds_2':  '+$2.00',
+        'dare_outcome_add_funds_1':  '+$1.00',
+        'dare_outcome_add_funds_50': '+$0.50',
+        'dare_outcome_remove_funds': '-$0.50',
+        'dare_outcome_refer_player': 'Refer a Player!',
+        'dare_outcome_swap_square':  'Surprise Deed!',
+        'dare_outcome_nothing':      'No Effect',
+      }
+
+      const outcomes: Outcome[] = []
+      for (const row of (cfgRows ?? [])) {
+        const type = typeMap[row.config_key]
+        if (!type) continue
+        const [wStr, aStr] = (row.config_value ?? '0:0').split(':')
+        const weight = parseInt(wStr ?? '0') || 0
+        const amount = parseFloat(aStr ?? '0') || 0
+        if (weight <= 0) continue
+        outcomes.push({ type, label: labelMap[row.config_key] ?? type, weight, amount })
+      }
+
+      if (outcomes.length === 0) {
+        return errorResponse('No dare outcomes configured', 500)
+      }
+
+      // ── Weighted random selection ───────────────────────────────────────────
+      // Uses crypto.getRandomValues for genuine randomness (not seeded).
+      function pickOutcome(pool: Outcome[]): Outcome {
+        const totalWeight = pool.reduce((s, o) => s + o.weight, 0)
+        const randBuf = new Uint32Array(1)
+        crypto.getRandomValues(randBuf)
+        let roll = (randBuf[0] / 4_294_967_296) * totalWeight
+        for (const o of pool) {
+          roll -= o.weight
+          if (roll <= 0) return o
+        }
+        return pool[pool.length - 1]
+      }
+
+      // Load wallet balance for negative-balance check
+      let { data: wallet } = await supabase
+        .from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
+      if (!wallet) {
+        const { data: w } = await supabase
+          .from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
+        wallet = w
+      }
+      const currentBalance = parseFloat(wallet.balance)
+
+      // Pick outcome. Rule 1: if remove_funds would take wallet negative, re-roll
+      // to a non-remove_funds outcome (hardcoded, not configurable).
+      let chosen = pickOutcome(outcomes)
+      if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
+        const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
+        if (safePool.length > 0) {
+          chosen = pickOutcome(safePool)
+        } else {
+          // All outcomes are remove_funds (pathological config) — fall back to nothing.
+          chosen = { type: 'nothing', weight: 1, amount: 0 }
+        }
+      }
+
+      // ── Execute the chosen outcome ──────────────────────────────────────────
+      const cells: Cell[] = JSON.parse(card.card_data)
+      const completed = parseJsonArr(card.completed_cells)
+      const purchased = parseJsonArr(card.purchased_cells)
+      const referral = parseJsonArr(card.referral_cells)
+
+      let newBalance = currentBalance
+      const result: Record<string, unknown> = { outcome: chosen.type, label: chosen.label, amount: chosen.amount }
+
+      if (chosen.type === 'add_funds') {
+        newBalance = currentBalance + chosen.amount
+        await supabase.from('player_wallets')
+          .update({ balance: newBalance, updated_at: new Date().toISOString() })
+          .eq('user_id', user.sub)
+        await supabase.from('wallet_transactions').insert({
+          user_id: user.sub,
+          amount: chosen.amount,
+          transaction_type: 'dare_reward',
+          item_description: `Dare Spin reward (+$${chosen.amount.toFixed(2)})`,
+        })
+        result.new_balance = newBalance
+
+      } else if (chosen.type === 'remove_funds') {
+        // Rule 1 already guaranteed this won't go negative.
+        newBalance = Math.max(0, currentBalance - chosen.amount)
+        await supabase.from('player_wallets')
+          .update({ balance: newBalance, updated_at: new Date().toISOString() })
+          .eq('user_id', user.sub)
+        await supabase.from('wallet_transactions').insert({
+          user_id: user.sub,
+          amount: -chosen.amount,
+          transaction_type: 'dare_penalty',
+          item_description: `Dare Spin penalty (-$${chosen.amount.toFixed(2)})`,
+        })
+        result.new_balance = newBalance
+
+      } else if (chosen.type === 'swap_square') {
+        // Pick a random uncompleted, non-special cell to swap.
+        // "Uncompleted" means not in completed, purchased, or referral arrays.
+        const allMarked = new Set([...completed, ...purchased, ...referral])
+        const swappableCells = cells.filter(
+          (c) => !c.is_free_space && !c.is_purchasable && !c.is_referral_free && !allMarked.has(c.index)
+        )
+        if (swappableCells.length === 0) {
+          // No eligible cells — fall back to nothing
+          result.outcome = 'nothing'
+          result.swap_skipped_reason = 'no_eligible_cells'
+        } else {
+          // Pick a random cell from swappable pool
+          const randBuf2 = new Uint32Array(1)
+          crypto.getRandomValues(randBuf2)
+          const swapIdx = Math.floor((randBuf2[0] / 4_294_967_296) * swappableCells.length)
+          const targetCell = swappableCells[swapIdx]
+
+          // Fetch a replacement deed that isn't already on the card
+          const existingDeedIds = new Set(cells.map((c) => c.deed_id).filter((id): id is number => id != null))
+          const { data: replacementDeeds } = await supabase
+            .from('good_deeds').select('*').eq('is_active', true)
+          const eligible = (replacementDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
+
+          if (eligible.length === 0) {
+            result.outcome = 'nothing'
+            result.swap_skipped_reason = 'no_replacement_deeds'
+          } else {
+            const randBuf3 = new Uint32Array(1)
+            crypto.getRandomValues(randBuf3)
+            const newDeed = eligible[Math.floor((randBuf3[0] / 4_294_967_296) * eligible.length)]
+
+            // Swap the cell deed
+            cells[targetCell.index] = {
+              ...targetCell,
+              deed_text: newDeed.deed_text,
+              deed_text_long: newDeed.deed_text_long ?? null,
+              deed_id: newDeed.id,
+              quantity: newDeed.quantity ?? 1,
+              is_secret: false,
+              secret_reward: null,
+              secret_revealed: false,
+            }
+
+            // Rule 2: swap_square ALWAYS un-marks the swapped cell.
+            // Remove it from completed_cells so the player must complete the new deed.
+            const updatedCompleted = completed.filter((i) => i !== targetCell.index)
+            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+            const isBingo = checkBingo(allCompleted, card.win_condition)
+
+            await supabase.from('player_cards').update({
+              card_data: JSON.stringify(cells),
+              completed_cells: JSON.stringify(updatedCompleted),
+              is_bingo: isBingo,
+              updated_at: new Date().toISOString(),
+            }).eq('id', card_id)
+
+            result.swapped_cell_index = targetCell.index
+            result.old_deed = targetCell.deed_text
+            result.new_deed = newDeed.deed_text
+            result.completed_cells = updatedCompleted
+            result.is_bingo = isBingo
+          }
+        }
+
+      } else if (chosen.type === 'refer_player') {
+        // No game state change — frontend shows the referral UI
+        result.outcome = 'refer_player'
+        result.message = 'Refer a new player to unlock this square!'
+
+      } else if (chosen.type === 'mark_random') {
+        // Auto-mark a random uncompleted, non-special cell.
+        const allMarked2 = new Set([...completed, ...purchased, ...referral])
+        const markableCells = cells.filter(
+          (c) => !c.is_purchasable && !c.is_referral_free && !c.is_free_space && !allMarked2.has(c.index)
+        )
+        if (markableCells.length === 0) {
+          result.outcome = 'nothing'
+          result.mark_skipped_reason = 'no_eligible_cells'
+        } else {
+          const randBuf4 = new Uint32Array(1)
+          crypto.getRandomValues(randBuf4)
+          const markCell = markableCells[Math.floor((randBuf4[0] / 4_294_967_296) * markableCells.length)]
+          const updatedCompleted2 = [...completed, markCell.index]
+          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral])]
+          const isBingo2 = checkBingo(allCompleted2, card.win_condition)
+
+          await supabase.from('player_cards').update({
+            completed_cells: JSON.stringify(updatedCompleted2),
+            is_bingo: isBingo2,
+            updated_at: new Date().toISOString(),
+          }).eq('id', card_id)
+
+          // First time reaching bingo via dare: send email (best-effort)
+          if (isBingo2 && !card.is_bingo && user.email) {
+            const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+            await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+          }
+
+          result.marked_cell_index = markCell.index
+          result.marked_deed = markCell.deed_text
+          result.completed_cells = updatedCompleted2
+          result.is_bingo = isBingo2
+        }
+
+      } else {
+        // nothing — no game state change
+        result.message = 'No effect this time. Better luck next spin!'
+      }
+
+      // Increment dare_clicks regardless of outcome
+      await supabase.from('player_cards')
+        .update({ dare_clicks: dareClicks + 1, updated_at: new Date().toISOString() })
+        .eq('id', card_id)
+
+      result.dare_clicks_used = dareClicks + 1
+      result.dare_clicks_remaining = Math.max(0, maxSpins - (dareClicks + 1))
+      return jsonResponse({ success: true, ...result })
+    }
+
+    // ── GET /my-profile ───────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-profile') {
+      const user = requireAuth(authUser)
+
+      // Fetch all cards for this user
+      const { data: cards } = await supabase
+        .from('player_cards')
+        .select('completed_cells, purchased_cells, referral_cells')
+        .eq('user_id', user.sub)
+
+      let totalDeeds = 0
+      for (const card of (cards ?? [])) {
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const purchasedSet = new Set(purchased)
+        const referralSet = new Set(referral)
+        for (const idx of completed) {
+          // Exclude purchased cells, referral cells, and free space (index 12)
+          if (!purchasedSet.has(idx) && !referralSet.has(idx) && idx !== 12) {
+            totalDeeds++
+          }
+        }
+      }
+
+      const badge = getBadge(totalDeeds)
+      return jsonResponse({
+        total_deeds: totalDeeds,
+        badge_name: badge.name,
+        badge_emoji: badge.emoji,
+        next_badge_name: badge.next_name,
+        next_badge_emoji: badge.next_emoji,
+        deeds_to_next_badge: badge.deeds_to_next,
+      })
+    }
+
+    // ── GET /admin/player-badges ──────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/player-badges') {
+      requireAdmin(authUser)
+
+      const { data: allCards } = await supabase
+        .from('player_cards')
+        .select('user_id, completed_cells, purchased_cells, referral_cells')
+
+      const { data: allUsers } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, player_number')
+
+      // Tally deeds per user
+      const deedCounts: Record<string, number> = {}
+      for (const card of (allCards ?? [])) {
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const purchasedSet = new Set(purchased)
+        const referralSet = new Set(referral)
+        let count = 0
+        for (const idx of completed) {
+          if (!purchasedSet.has(idx) && !referralSet.has(idx) && idx !== 12) {
+            count++
+          }
+        }
+        deedCounts[card.user_id] = (deedCounts[card.user_id] ?? 0) + count
+      }
+
+      const players = (allUsers ?? []).map((u) => {
+        const total = deedCounts[u.id] ?? 0
+        const badge = getBadge(total)
+        return {
+          user_id: u.id,
+          first_name: u.first_name,
+          last_name: u.last_name,
+          player_number: u.player_number,
+          total_deeds: total,
+          badge_name: badge.name,
+          badge_emoji: badge.emoji,
+        }
+      }).sort((a, b) => b.total_deeds - a.total_deeds)
+
+      return jsonResponse({ players })
     }
 
     return errorResponse('Not found', 404)

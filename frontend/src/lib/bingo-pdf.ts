@@ -215,3 +215,149 @@ export function downloadBingoCardPdf(
   const dateTag = new Date().toISOString().slice(0, 10);
   doc.save(`gr8day-bingo-${safeName}-${dateTag}.pdf`);
 }
+
+export interface TeamMemberCard {
+  playerName: string;
+  playerNumber?: string | null;
+  card: CardData;
+}
+
+/**
+ * Generate and download a team PDF — up to 4 player cards in a 2×2 grid on one 8.5×11 sheet.
+ */
+export function downloadTeamCardsPdf(
+  teamName: string,
+  members: TeamMemberCard[],
+  opts: { winConditionLabel?: string } = {},
+): void {
+  const doc = new jsPDF({ unit: 'in', format: 'letter', orientation: 'portrait' });
+  const pageW = 8.5;
+  const pageH = 11;
+
+  const BLACK = 0;
+  const MID_GRAY = 140;
+  const LIGHT_GRAY = 220;
+  const NEAR_WHITE = 245;
+
+  // Title band
+  doc.setFillColor(BLACK);
+  doc.rect(0, 0, pageW, 0.65, 'F');
+  doc.setTextColor(255, 255, 255);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.text('Gr8Day Bingo', pageW / 2, 0.35, { align: 'center' });
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(9);
+  doc.text(`Team: ${teamName}${opts.winConditionLabel ? `  |  Win: ${opts.winConditionLabel}` : ''}`, pageW / 2, 0.55, { align: 'center' });
+
+  // 2×2 grid — each card occupies roughly half the page minus margins
+  const cols = 2;
+  const rows = 2;
+  const hPad = 0.25;  // horizontal outer margin
+  const vPad = 0.05;  // vertical outer margin below title
+  const gap = 0.15;   // gap between cards
+  const topOffset = 0.65 + vPad;
+  const cardW = (pageW - hPad * 2 - gap) / cols;
+  const cardH = (pageH - topOffset - vPad - gap) / rows;
+
+  const renderMiniCard = (member: TeamMemberCard, col: number, row: number) => {
+    const ox = hPad + col * (cardW + gap);
+    const oy = topOffset + row * (cardH + gap);
+
+    const card = member.card;
+    const cellHeaderH = 0.28;
+    const nameH = 0.22;
+
+    // Mini title bar
+    doc.setFillColor(BLACK);
+    doc.rect(ox, oy, cardW, nameH, 'F');
+    doc.setTextColor(255, 255, 255);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    const label = member.playerNumber
+      ? `${member.playerName}  (${member.playerNumber})`
+      : member.playerName;
+    doc.text(label, ox + cardW / 2, oy + nameH / 2 + 0.035, { align: 'center' });
+
+    // Column headers GR8DAY
+    const gridTop = oy + nameH;
+    const cellSize = cardW / 5;
+    for (let i = 0; i < 5; i++) {
+      const cx = ox + i * cellSize;
+      doc.setFillColor(60);
+      doc.rect(cx, gridTop, cellSize, cellHeaderH, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(9);
+      doc.text(HEADER_LETTERS[i], cx + cellSize / 2, gridTop + cellHeaderH / 2 + 0.04, { align: 'center' });
+    }
+
+    const bodyTop = gridTop + cellHeaderH;
+    const bodyCellH = (cardH - nameH - cellHeaderH) / 5;
+    doc.setDrawColor(BLACK);
+    doc.setLineWidth(0.012);
+
+    for (let r = 0; r < 5; r++) {
+      for (let c = 0; c < 5; c++) {
+        const idx = r * 5 + c;
+        const cx = ox + c * cellSize;
+        const cy = bodyTop + r * bodyCellH;
+        const cell = card.cells.find((cl) => cl.index === idx);
+        const isCompleted = card.completed_cells?.includes(idx) || card.purchased_cells?.includes(idx) || card.referral_cells?.includes(idx);
+        const isFree = !!cell?.is_free_space;
+
+        if (isCompleted) {
+          doc.setFillColor(MID_GRAY);
+        } else if (isFree) {
+          doc.setFillColor(LIGHT_GRAY);
+        } else {
+          doc.setFillColor(NEAR_WHITE);
+        }
+        doc.rect(cx, cy, cellSize, bodyCellH, 'F');
+        doc.setDrawColor(BLACK);
+        doc.rect(cx, cy, cellSize, bodyCellH, 'S');
+
+        doc.setTextColor(isCompleted ? 255 : BLACK);
+        if (isFree && !cell?.deed_text) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(6);
+          doc.text('FREE', cx + cellSize / 2, cy + bodyCellH / 2 + 0.02, { align: 'center' });
+        } else if (cell?.deed_text) {
+          doc.setFont('helvetica', 'normal');
+          doc.setFontSize(5.5);
+          const lines = doc.splitTextToSize(cell.deed_text, cellSize - 0.04);
+          const visible = lines.slice(0, 4);
+          const lineH = 0.075;
+          const blockH = visible.length * lineH;
+          const startY = cy + (bodyCellH - blockH) / 2 + 0.06;
+          visible.forEach((ln: string, li: number) => {
+            doc.text(ln, cx + cellSize / 2, startY + li * lineH, { align: 'center' });
+          });
+        }
+
+        if (isCompleted) {
+          doc.setDrawColor(BLACK);
+          doc.setLineWidth(0.025);
+          doc.line(cx + 0.07, cy + 0.05, cx + cellSize - 0.07, cy + bodyCellH - 0.05);
+          doc.line(cx + cellSize - 0.07, cy + 0.05, cx + 0.07, cy + bodyCellH - 0.05);
+          doc.setLineWidth(0.012);
+        }
+      }
+    }
+  };
+
+  const slots = members.slice(0, 4);
+  slots.forEach((member, i) => {
+    const col = i % cols;
+    const row = Math.floor(i / cols);
+    renderMiniCard(member, col, row);
+  });
+
+  doc.setFontSize(7);
+  doc.setTextColor(MID_GRAY);
+  doc.text('Printed from havagr8day.com', pageW / 2, pageH - 0.18, { align: 'center' });
+
+  const safeName = teamName.replace(/[^a-zA-Z0-9_-]+/g, '_').slice(0, 40);
+  const dateTag = new Date().toISOString().slice(0, 10);
+  doc.save(`gr8day-team-${safeName}-${dateTag}.pdf`);
+}

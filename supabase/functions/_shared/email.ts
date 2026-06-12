@@ -70,6 +70,21 @@ function layout(innerHtml: string): string {
 
 // ── Templates ────────────────────────────────────────────────────────────────
 
+export function verifyEmailEmail(verifyUrl: string): { subject: string; html: string } {
+  return {
+    subject: 'Verify your Havagr8day Bingo email address',
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#4F46E5;font-size:20px">Confirm your email</h2>
+      <p>Thanks for signing up! Click the button below to verify your email address and start playing.</p>
+      <p>This link expires in <strong>24 hours</strong>.</p>
+      <p style="text-align:center;margin:24px 0">
+        <a href="${verifyUrl}" style="display:inline-block;background:#DC2626;color:#fff;font-weight:bold;padding:13px 30px;border-radius:10px;text-decoration:none;border:2px solid #FCD34D">Verify My Email</a>
+      </p>
+      <p style="color:#64748b;font-size:13px">If you didn't create this account, you can safely ignore this email.</p>
+    `),
+  }
+}
+
 export function passwordResetEmail(resetUrl: string): { subject: string; html: string } {
   return {
     subject: 'Reset your Havagr8day Bingo password',
@@ -147,6 +162,18 @@ export function bingoWinEmail(name: string | null, winConditionLabel?: string | 
         <a href="${SITE_URL}/game" style="display:inline-block;background:#10B981;color:#fff;font-weight:bold;padding:13px 30px;border-radius:10px;text-decoration:none">View My Card</a>
       </p>
       <p style="color:#64748b;font-size:13px">Keep being gr8.</p>
+    `),
+  }
+}
+
+export function newPlayerNotificationEmail(firstName: string, lastName: string, email: string): { subject: string; html: string } {
+  return {
+    subject: `New player signed up: ${firstName} ${lastName}`,
+    html: layout(`
+      <h2 style="margin:0 0 12px;color:#4F46E5;font-size:20px">New player just registered!</h2>
+      <p><strong>Name:</strong> ${firstName} ${lastName}</p>
+      <p><strong>Email:</strong> ${email}</p>
+      <p style="color:#64748b;font-size:13px">This is an automatic notification from Havagr8day Bingo.</p>
     `),
   }
 }

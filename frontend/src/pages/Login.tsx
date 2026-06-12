@@ -29,8 +29,8 @@ const Login: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      await login({ email: mail, password });
-      toast.success('Welcome back!');
+      const { first_name } = await login({ email: mail, password });
+      toast.success(first_name ? `Welcome back, ${first_name}!` : 'Welcome back!');
       navigate(redirectTo, { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed.';
@@ -110,6 +110,12 @@ const Login: React.FC = () => {
                 </Link>
               </p>
             </div>
+            <p className="text-center text-xs text-slate-400 pt-1">
+              Didn't get a verification email?{' '}
+              <Link to="/resend-verification" className="text-indigo-500 hover:text-indigo-700 underline underline-offset-2">
+                Resend it
+              </Link>
+            </p>
           </form>
         </CardContent>
       </Card>
