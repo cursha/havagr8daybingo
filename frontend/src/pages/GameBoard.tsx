@@ -462,7 +462,14 @@ const GameBoard: React.FC = () => {
                 onClick={() => navigate('/profile')}
                 className="hidden sm:flex items-center gap-1 hover:opacity-80 transition-opacity"
               >
-                {playerBadge && <span className="text-base leading-none">{playerBadge.badge_emoji}</span>}
+                {playerBadge && (
+                  <img
+                    src={`/badge-${playerBadge.badge_name.toLowerCase()}.png`}
+                    alt={playerBadge.badge_name}
+                    className="w-6 h-6 rounded-full object-cover"
+                    onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+                  />
+                )}
                 <span className="text-xs text-white/50 font-mono">GR8-{playerNumber}</span>
               </button>
             )}

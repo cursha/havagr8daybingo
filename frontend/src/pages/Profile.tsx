@@ -6,6 +6,16 @@ import { ArrowLeft, Heart } from 'lucide-react';
 
 const HERO_BG = 'linear-gradient(135deg, #312e81 0%, #1e3a5f 50%, #064e3b 100%)';
 
+const BADGE_IMAGES: Record<string, string> = {
+  Newcomer: '/badge-newcomer.png',
+  Starter:  '/badge-starter.png',
+  Builder:  '/badge-builder.png',
+  Champion: '/badge-champion.png',
+  Hero:     '/badge-hero.png',
+  Legend:   '/badge-legend.png',
+  Expert:   '/badge-expert.png',
+};
+
 const Profile: React.FC = () => {
   const navigate = useNavigate();
   const { user, loading: authLoading } = useAuth();
@@ -107,16 +117,24 @@ const Profile: React.FC = () => {
                 : 'bg-white/10 border border-white/20'
             }`}
           >
-            {/* Badge emoji with glow ring */}
+            {/* Badge image with glow ring */}
             <div className="flex justify-center">
               <div
-                className={`w-28 h-28 rounded-full flex items-center justify-center text-6xl shadow-lg ${
+                className={`w-28 h-28 rounded-full flex items-center justify-center shadow-lg overflow-hidden ${
                   isMaxBadge
-                    ? 'bg-yellow-400/30 ring-4 ring-yellow-300/70 animate-pulse'
-                    : 'bg-white/10 ring-4 ring-emerald-400/40'
+                    ? 'ring-4 ring-yellow-300/70 animate-pulse'
+                    : 'ring-4 ring-emerald-400/40'
                 }`}
               >
-                {badge.badge_emoji}
+                {BADGE_IMAGES[badge.badge_name] ? (
+                  <img
+                    src={BADGE_IMAGES[badge.badge_name]}
+                    alt={badge.badge_name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="text-6xl">{badge.badge_emoji}</span>
+                )}
               </div>
             </div>
 
@@ -192,7 +210,11 @@ const Profile: React.FC = () => {
                     isActive ? 'bg-emerald-500/20 border border-emerald-400/40' : ''
                   }`}
                 >
-                  <span className="text-lg w-7 text-center">{tier.emoji}</span>
+                  {BADGE_IMAGES[tier.name] ? (
+                    <img src={BADGE_IMAGES[tier.name]} alt={tier.name} className="w-7 h-7 object-cover rounded-full" />
+                  ) : (
+                    <span className="text-lg w-7 text-center">{tier.emoji}</span>
+                  )}
                   <div className="flex-1">
                     <span className={`text-sm font-medium ${isActive ? 'text-emerald-300' : 'text-white/70'}`}>
                       {tier.name}
