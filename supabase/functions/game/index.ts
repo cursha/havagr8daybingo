@@ -20,6 +20,20 @@ interface Cell {
   quantity: number
 }
 
+// ── Security: strip secret fields before sending cells to client ─────────────
+// is_secret and secret_reward must never be exposed until the square is revealed.
+function sanitizeCells(cells: Cell[], completedCells: number[]): unknown[] {
+  return cells.map((c) => {
+    const revealed = c.secret_revealed === true || completedCells.includes(c.index)
+    const { is_secret, secret_reward, secret_revealed, ...rest } = c
+    return {
+      ...rest,
+      // Only tell the client a square is secret AFTER it has been marked
+      ...(is_secret && revealed ? { is_secret: true, secret_reward, secret_revealed: true } : {}),
+    }
+  })
+}
+
 // ── Badge System ─────────────────────────────────────────────────────────────
 function getBadge(totalDeeds: number): { name: string; emoji: string; next_name: string | null; next_emoji: string | null; deeds_to_next: number | null } {
   const tiers = [
@@ -225,12 +239,13 @@ Deno.serve(async (req: Request) => {
           }).eq('id', existing.id)
         }
 
+        const completedIdx = parseJsonArr(existing.completed_cells) as number[]
         return jsonResponse({
           card_id: existing.id,
           week_year: existing.week_year,
-          cells,
+          cells: sanitizeCells(cells, completedIdx),
           win_condition: existing.win_condition,
-          completed_cells: parseJsonArr(existing.completed_cells),
+          completed_cells: completedIdx,
           purchased_cells: parseJsonArr(existing.purchased_cells),
           referral_cells: parseJsonArr(existing.referral_cells),
           is_bingo: existing.is_bingo ?? false,
@@ -346,7 +361,7 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({
         card_id: newCard.id,
         week_year: newCard.week_year,
-        cells,
+        cells: sanitizeCells(cells, []),
         win_condition: adminWinCondition,
         completed_cells: [],
         purchased_cells: [],
@@ -457,7 +472,7 @@ Deno.serve(async (req: Request) => {
         success: true,
         card_id: card.id,
         week_year: card.week_year,
-        cells: JSON.parse(card.card_data),
+        cells: sanitizeCells(JSON.parse(card.card_data), []),
         win_condition: card.win_condition,
         completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false, dare_clicks: 0,
       })
