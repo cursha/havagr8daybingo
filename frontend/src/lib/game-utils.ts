@@ -427,6 +427,9 @@ export async function registerProfile(payload: {
   first_name: string;
   last_name: string;
   email: string;
+  city?: string;
+  country_id?: number | '';
+  state_id?: number | '';
   province_state?: string;
   country?: string;
   challenge_level?: number | null;

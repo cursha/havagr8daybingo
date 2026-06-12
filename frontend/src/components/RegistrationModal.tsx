@@ -116,11 +116,10 @@ const RegistrationModal: React.FC<RegistrationModalProps> = ({ enforce = true, o
         city: city.trim() || undefined,
         country_id: countryId || undefined,
         state_id: stateId || undefined,
-        // Keep legacy text fields in sync
         province_state: states.find((s) => s.id === stateId)?.name || undefined,
         country: selectedCountry?.name || undefined,
         challenge_level: challengeLevel ? parseInt(challengeLevel) : null,
-      } as any);
+      });
       if (data?.bonus_granted) {
         toast.success(`🎉 Welcome! ${bonusLabel} has been credited to your wallet.`);
       } else {
