@@ -206,6 +206,7 @@ Deno.serve(async (req: Request) => {
           purchased_cells: parseJsonArr(existing.purchased_cells),
           referral_cells: parseJsonArr(existing.referral_cells),
           is_bingo: existing.is_bingo ?? false,
+          dare_clicks: existing.dare_clicks ?? 0,
         })
       }
 
@@ -430,7 +431,7 @@ Deno.serve(async (req: Request) => {
         week_year: card.week_year,
         cells: JSON.parse(card.card_data),
         win_condition: card.win_condition,
-        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false,
+        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false, dare_clicks: 0,
       })
     }
 
@@ -1720,6 +1721,279 @@ Deno.serve(async (req: Request) => {
         .eq('id', tradeId)
 
       return jsonResponse({ success: true })
+    }
+
+    // ── POST /dare-spin ───────────────────────────────────────────────────────
+    // Spin the Dare wheel for the current player's active card.
+    //
+    // Confirmed design rules (hardcoded, not admin-toggleable):
+    //   1. No negative balance — ever. If remove_funds would take the wallet
+    //      below $0.00, re-roll until a non-remove_funds outcome is selected.
+    //   2. swap_square always un-marks the swapped cell. The player must complete
+    //      the new deed before the square counts.
+    //   3. Dare clicks are per-week per-card. dare_clicks lives on player_cards
+    //      which has one row per player per week, so it resets automatically when
+    //      a new card is generated.
+    if (method === 'POST' && path === '/dare-spin') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { card_id } = body
+
+      // Load the player's card
+      const { data: card } = await supabase
+        .from('player_cards').select('*')
+        .eq('id', card_id).eq('user_id', user.sub).maybeSingle()
+      if (!card) return errorResponse('Card not found', 404)
+
+      // Hardcoded: 1 dare spin per card per week (resets automatically with new card)
+      const maxSpins = 1
+      const dareClicks: number = card.dare_clicks ?? 0
+      if (dareClicks >= maxSpins) {
+        return errorResponse('You have already used your Dare Spin for this week', 400)
+      }
+
+      // Check dare_enabled
+      const { data: enabledCfg } = await supabase
+        .from('game_configs').select('config_value')
+        .eq('config_key', 'dare_enabled').maybeSingle()
+      if (enabledCfg?.config_value === 'false') {
+        return errorResponse('Dare Spin is currently disabled', 400)
+      }
+
+      // ── Load outcome weights from game_configs ──────────────────────────────
+      // Keys that start with dare_outcome_* each have format "weight:amount"
+      const { data: cfgRows } = await supabase
+        .from('game_configs').select('config_key, config_value')
+        .like('config_key', 'dare_outcome_%')
+
+      type OutcomeType = 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing'
+      interface Outcome { type: OutcomeType; label: string; weight: number; amount: number }
+
+      const typeMap: Record<string, OutcomeType> = {
+        'dare_outcome_add_funds_2':  'add_funds',
+        'dare_outcome_add_funds_1':  'add_funds',
+        'dare_outcome_add_funds_50': 'add_funds',
+        'dare_outcome_remove_funds': 'remove_funds',
+        'dare_outcome_refer_player': 'refer_player',
+        'dare_outcome_swap_square':  'swap_square',
+        'dare_outcome_nothing':      'nothing',
+      }
+      const labelMap: Record<string, string> = {
+        'dare_outcome_add_funds_2':  '+$2.00',
+        'dare_outcome_add_funds_1':  '+$1.00',
+        'dare_outcome_add_funds_50': '+$0.50',
+        'dare_outcome_remove_funds': '-$0.50',
+        'dare_outcome_refer_player': 'Refer a Player!',
+        'dare_outcome_swap_square':  'Surprise Deed!',
+        'dare_outcome_nothing':      'No Effect',
+      }
+
+      const outcomes: Outcome[] = []
+      for (const row of (cfgRows ?? [])) {
+        const type = typeMap[row.config_key]
+        if (!type) continue
+        const [wStr, aStr] = (row.config_value ?? '0:0').split(':')
+        const weight = parseInt(wStr ?? '0') || 0
+        const amount = parseFloat(aStr ?? '0') || 0
+        if (weight <= 0) continue
+        outcomes.push({ type, label: labelMap[row.config_key] ?? type, weight, amount })
+      }
+
+      if (outcomes.length === 0) {
+        return errorResponse('No dare outcomes configured', 500)
+      }
+
+      // ── Weighted random selection ───────────────────────────────────────────
+      // Uses crypto.getRandomValues for genuine randomness (not seeded).
+      function pickOutcome(pool: Outcome[]): Outcome {
+        const totalWeight = pool.reduce((s, o) => s + o.weight, 0)
+        const randBuf = new Uint32Array(1)
+        crypto.getRandomValues(randBuf)
+        let roll = (randBuf[0] / 4_294_967_296) * totalWeight
+        for (const o of pool) {
+          roll -= o.weight
+          if (roll <= 0) return o
+        }
+        return pool[pool.length - 1]
+      }
+
+      // Load wallet balance for negative-balance check
+      let { data: wallet } = await supabase
+        .from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
+      if (!wallet) {
+        const { data: w } = await supabase
+          .from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
+        wallet = w
+      }
+      const currentBalance = parseFloat(wallet.balance)
+
+      // Pick outcome. Rule 1: if remove_funds would take wallet negative, re-roll
+      // to a non-remove_funds outcome (hardcoded, not configurable).
+      let chosen = pickOutcome(outcomes)
+      if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
+        const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
+        if (safePool.length > 0) {
+          chosen = pickOutcome(safePool)
+        } else {
+          // All outcomes are remove_funds (pathological config) — fall back to nothing.
+          chosen = { type: 'nothing', weight: 1, amount: 0 }
+        }
+      }
+
+      // ── Execute the chosen outcome ──────────────────────────────────────────
+      const cells: Cell[] = JSON.parse(card.card_data)
+      const completed = parseJsonArr(card.completed_cells)
+      const purchased = parseJsonArr(card.purchased_cells)
+      const referral = parseJsonArr(card.referral_cells)
+
+      let newBalance = currentBalance
+      const result: Record<string, unknown> = { outcome: chosen.type, label: chosen.label, amount: chosen.amount }
+
+      if (chosen.type === 'add_funds') {
+        newBalance = currentBalance + chosen.amount
+        await supabase.from('player_wallets')
+          .update({ balance: newBalance, updated_at: new Date().toISOString() })
+          .eq('user_id', user.sub)
+        await supabase.from('wallet_transactions').insert({
+          user_id: user.sub,
+          amount: chosen.amount,
+          transaction_type: 'dare_reward',
+          item_description: `Dare Spin reward (+$${chosen.amount.toFixed(2)})`,
+        })
+        result.new_balance = newBalance
+
+      } else if (chosen.type === 'remove_funds') {
+        // Rule 1 already guaranteed this won't go negative.
+        newBalance = Math.max(0, currentBalance - chosen.amount)
+        await supabase.from('player_wallets')
+          .update({ balance: newBalance, updated_at: new Date().toISOString() })
+          .eq('user_id', user.sub)
+        await supabase.from('wallet_transactions').insert({
+          user_id: user.sub,
+          amount: -chosen.amount,
+          transaction_type: 'dare_penalty',
+          item_description: `Dare Spin penalty (-$${chosen.amount.toFixed(2)})`,
+        })
+        result.new_balance = newBalance
+
+      } else if (chosen.type === 'swap_square') {
+        // Pick a random uncompleted, non-special cell to swap.
+        // "Uncompleted" means not in completed, purchased, or referral arrays.
+        const allMarked = new Set([...completed, ...purchased, ...referral])
+        const swappableCells = cells.filter(
+          (c) => !c.is_free_space && !c.is_purchasable && !c.is_referral_free && !allMarked.has(c.index)
+        )
+        if (swappableCells.length === 0) {
+          // No eligible cells — fall back to nothing
+          result.outcome = 'nothing'
+          result.swap_skipped_reason = 'no_eligible_cells'
+        } else {
+          // Pick a random cell from swappable pool
+          const randBuf2 = new Uint32Array(1)
+          crypto.getRandomValues(randBuf2)
+          const swapIdx = Math.floor((randBuf2[0] / 4_294_967_296) * swappableCells.length)
+          const targetCell = swappableCells[swapIdx]
+
+          // Fetch a replacement deed that isn't already on the card
+          const existingDeedIds = new Set(cells.map((c) => c.deed_id).filter((id): id is number => id != null))
+          const { data: replacementDeeds } = await supabase
+            .from('good_deeds').select('*').eq('is_active', true)
+          const eligible = (replacementDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
+
+          if (eligible.length === 0) {
+            result.outcome = 'nothing'
+            result.swap_skipped_reason = 'no_replacement_deeds'
+          } else {
+            const randBuf3 = new Uint32Array(1)
+            crypto.getRandomValues(randBuf3)
+            const newDeed = eligible[Math.floor((randBuf3[0] / 4_294_967_296) * eligible.length)]
+
+            // Swap the cell deed
+            cells[targetCell.index] = {
+              ...targetCell,
+              deed_text: newDeed.deed_text,
+              deed_text_long: newDeed.deed_text_long ?? null,
+              deed_id: newDeed.id,
+              quantity: newDeed.quantity ?? 1,
+              is_secret: false,
+              secret_reward: null,
+              secret_revealed: false,
+            }
+
+            // Rule 2: swap_square ALWAYS un-marks the swapped cell.
+            // Remove it from completed_cells so the player must complete the new deed.
+            const updatedCompleted = completed.filter((i) => i !== targetCell.index)
+            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+            const isBingo = checkBingo(allCompleted, card.win_condition)
+
+            await supabase.from('player_cards').update({
+              card_data: JSON.stringify(cells),
+              completed_cells: JSON.stringify(updatedCompleted),
+              is_bingo: isBingo,
+              updated_at: new Date().toISOString(),
+            }).eq('id', card_id)
+
+            result.swapped_cell_index = targetCell.index
+            result.old_deed = targetCell.deed_text
+            result.new_deed = newDeed.deed_text
+            result.completed_cells = updatedCompleted
+            result.is_bingo = isBingo
+          }
+        }
+
+      } else if (chosen.type === 'refer_player') {
+        // No game state change — frontend shows the referral UI
+        result.outcome = 'refer_player'
+        result.message = 'Refer a new player to unlock this square!'
+
+      } else if (chosen.type === 'mark_random') {
+        // Auto-mark a random uncompleted, non-special cell.
+        const allMarked2 = new Set([...completed, ...purchased, ...referral])
+        const markableCells = cells.filter(
+          (c) => !c.is_purchasable && !c.is_referral_free && !c.is_free_space && !allMarked2.has(c.index)
+        )
+        if (markableCells.length === 0) {
+          result.outcome = 'nothing'
+          result.mark_skipped_reason = 'no_eligible_cells'
+        } else {
+          const randBuf4 = new Uint32Array(1)
+          crypto.getRandomValues(randBuf4)
+          const markCell = markableCells[Math.floor((randBuf4[0] / 4_294_967_296) * markableCells.length)]
+          const updatedCompleted2 = [...completed, markCell.index]
+          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral])]
+          const isBingo2 = checkBingo(allCompleted2, card.win_condition)
+
+          await supabase.from('player_cards').update({
+            completed_cells: JSON.stringify(updatedCompleted2),
+            is_bingo: isBingo2,
+            updated_at: new Date().toISOString(),
+          }).eq('id', card_id)
+
+          // First time reaching bingo via dare: send email (best-effort)
+          if (isBingo2 && !card.is_bingo && user.email) {
+            const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+            await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+          }
+
+          result.marked_cell_index = markCell.index
+          result.marked_deed = markCell.deed_text
+          result.completed_cells = updatedCompleted2
+          result.is_bingo = isBingo2
+        }
+
+      } else {
+        // nothing — no game state change
+        result.message = 'No effect this time. Better luck next spin!'
+      }
+
+      // Increment dare_clicks regardless of outcome
+      await supabase.from('player_cards')
+        .update({ dare_clicks: dareClicks + 1, updated_at: new Date().toISOString() })
+        .eq('id', card_id)
+
+      result.dare_clicks_used = dareClicks + 1
+      result.dare_clicks_remaining = Math.max(0, maxSpins - (dareClicks + 1))
+      return jsonResponse({ success: true, ...result })
     }
 
     return errorResponse('Not found', 404)

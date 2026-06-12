@@ -66,6 +66,26 @@ export interface CardData {
   purchased_cells: number[];
   referral_cells: number[];
   is_bingo: boolean;
+  dare_clicks: number;
+}
+
+export interface DareSpinResult {
+  outcome: 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing';
+  label: string;
+  amount?: number;
+  new_balance?: number;
+  old_deed?: string;
+  new_deed?: string;
+  swapped_cell_index?: number;
+  completed_cells?: number[];
+  is_bingo?: boolean;
+  dare_clicks_used: number;
+  dare_clicks_remaining: number;
+  message?: string;
+}
+
+export async function spinDare(cardId: number): Promise<DareSpinResult> {
+  return apiClient.post<DareSpinResult>('/game/dare-spin', { card_id: cardId });
 }
 
 export interface WinCondition {

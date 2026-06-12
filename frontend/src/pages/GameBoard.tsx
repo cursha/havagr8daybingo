@@ -8,6 +8,7 @@ import {
   WalletData,
   PendingDeed,
   MyTeamData,
+  DareSpinResult,
   generateCard,
   markCell,
   unmarkCell,
@@ -20,10 +21,12 @@ import {
   resetCard,
   getMyTeam,
   getMyTrades,
+  spinDare,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
 import RegistrationModal from '@/components/RegistrationModal';
+import DareModal from '@/components/DareModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -74,6 +77,8 @@ const GameBoard: React.FC = () => {
   const [prize, setPrize] = useState<{ prize_image_url: string; prize_title: string } | null>(null);
   const [playerNumber, setPlayerNumber] = useState<number | null>(null);
   const [myTeam, setMyTeam] = useState<MyTeamData | null>(null);
+  const [dareResult, setDareResult] = useState<DareSpinResult | null>(null);
+  const [dareSpinning, setDareSpinning] = useState(false);
   const [pendingTradeCount, setPendingTradeCount] = useState(0);
 
   useEffect(() => {
@@ -345,6 +350,29 @@ const GameBoard: React.FC = () => {
     } catch (err) {
       console.error('Failed to generate team PDF', err);
       toast.error('Could not generate the team card. Please try again.');
+    }
+  };
+
+  const handleDareSpin = async () => {
+    if (!card || dareSpinning) return;
+    setDareSpinning(true);
+    try {
+      const result = await spinDare(card.card_id);
+      setDareResult(result);
+      // Reflect wallet change immediately
+      if (typeof result.new_balance === 'number') {
+        setWallet((prev) => prev ? { ...prev, balance: result.new_balance! } : prev);
+      }
+      // Refresh card if a square was swapped or marked
+      if (result.outcome === 'swap_square' || result.outcome === 'mark_random') {
+        await loadGame();
+      }
+      // Update dare_clicks on the local card
+      setCard((prev) => prev ? { ...prev, dare_clicks: result.dare_clicks_used } : prev);
+    } catch (err: any) {
+      toast.error(err?.message || 'Dare spin failed. Please try again.');
+    } finally {
+      setDareSpinning(false);
     }
   };
 
@@ -680,6 +708,8 @@ const GameBoard: React.FC = () => {
                             setCellProgress((prev) => ({ ...prev, [idx]: p }))
                           }
                           onUnmark={handleUnmark}
+                          onDare={handleDareSpin}
+                          dareUsed={(card.dare_clicks ?? 0) >= 1}
                         />
                       </div>
                     </div>
@@ -842,6 +872,17 @@ const GameBoard: React.FC = () => {
         onNewGame={handleStartNewGame}
         newGameLoading={actionLoading}
       />
+      {dareResult && (
+        <DareModal
+          result={dareResult}
+          onClose={() => setDareResult(null)}
+          onReferralFlow={() => {
+            setDareResult(null);
+            // Scroll to referral section
+            document.getElementById('referral-section')?.scrollIntoView({ behavior: 'smooth' });
+          }}
+        />
+      )}
     </div>
   );
 };
