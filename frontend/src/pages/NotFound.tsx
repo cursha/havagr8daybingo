@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Heart, Home } from 'lucide-react';
+import Footer from '@/components/Footer';
 
 const HERO_BG = '#4FB3E8';
 
@@ -9,7 +10,8 @@ const NotFound: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4" style={{ backgroundColor: HERO_BG }}>
+    <div className="min-h-screen flex flex-col" style={{ backgroundColor: HERO_BG }}>
+      <div className="flex-1 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl p-8 sm:p-12 max-w-md w-full text-center">
         <div className="flex justify-center mb-4">
           <Heart className="w-10 h-10 text-rose-500 fill-rose-500" />
@@ -31,6 +33,8 @@ const NotFound: React.FC = () => {
           </Button>
         </div>
       </div>
+      </div>
+      <Footer tone="dark" />
     </div>
   );
 };

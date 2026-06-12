@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Heart, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
+import Footer from '@/components/Footer';
 
 const HERO_BG = '#4FB3E8';
 
@@ -42,9 +43,10 @@ const Login: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
+      className="min-h-screen flex flex-col"
       style={{ backgroundColor: HERO_BG }}
     >
+      <div className="flex-1 flex items-center justify-center p-4">
       <Card className="w-full max-w-md shadow-2xl border-0">
         <CardHeader className="text-center space-y-2 pb-4">
           <button
@@ -119,6 +121,8 @@ const Login: React.FC = () => {
           </form>
         </CardContent>
       </Card>
+      </div>
+      <Footer tone="dark" />
     </div>
   );
 };

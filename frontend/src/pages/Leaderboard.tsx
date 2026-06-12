@@ -19,6 +19,7 @@ import {
   GameLeaderboardEntry,
 } from '@/lib/game-utils';
 import { toast } from 'sonner';
+import Footer from '@/components/Footer';
 
 /**
  * Convert an ISO week-year string like "2026-W17" into a human-friendly label
@@ -144,7 +145,7 @@ const Leaderboard: React.FC = () => {
   })();
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
         <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
@@ -282,6 +283,7 @@ const Leaderboard: React.FC = () => {
           </CardContent>
         </Card>
       </main>
+      <Footer tone="light" />
     </div>
   );
 };
