@@ -49,9 +49,13 @@ const WIN_CONDITIONS = [
   { id: 'fill_card', name: 'Fill the Card', description: 'Complete every square on the entire card' },
 ];
 
+const ADMIN_SESSION_KEY = 'admin_authenticated';
+
 const AdminPanel: React.FC = () => {
   const navigate = useNavigate();
-  const [authenticated, setAuthenticated] = useState(false);
+  const [authenticated, setAuthenticated] = useState(
+    () => sessionStorage.getItem(ADMIN_SESSION_KEY) === 'true'
+  );
   const [password, setPassword] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
 
@@ -111,6 +115,7 @@ const AdminPanel: React.FC = () => {
     try {
       await adminVerify(password);
       setAuthenticated(true);
+      sessionStorage.setItem(ADMIN_SESSION_KEY, 'true');
       toast.success('Admin access granted');
     } catch {
       toast.error('Invalid password');

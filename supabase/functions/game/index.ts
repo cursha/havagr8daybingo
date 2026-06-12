@@ -669,7 +669,7 @@ Deno.serve(async (req: Request) => {
       const { data: cfg } = await supabase
         .from('game_configs').select('config_value').eq('config_key', 'admin_password').maybeSingle()
       if (!cfg || cfg.config_value !== body.password) {
-        return errorResponse('Invalid admin password', 401)
+        return errorResponse('Invalid admin password', 403)
       }
       return jsonResponse({ success: true })
     }

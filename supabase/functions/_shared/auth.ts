@@ -18,7 +18,7 @@ function getAlgorithm(): string {
 }
 
 function getExpireSeconds(): number {
-  return parseInt(Deno.env.get('JWT_EXPIRE_MINUTES') ?? '60') * 60
+  return parseInt(Deno.env.get('JWT_EXPIRE_MINUTES') ?? '10080') * 60  // default 7 days
 }
 
 export async function createAccessToken(
