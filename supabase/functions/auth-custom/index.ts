@@ -72,36 +72,8 @@ Deno.serve(async (req: Request) => {
 
       if (error) throw error
 
-      // If this email was referred by someone, validate that referral now and
-      // reward each referrer. Their "Refer a Player" square auto-marks on their
-      // next card load (generate-card re-syncs referral squares when a validated
-      // referral exists). Best-effort: never block registration if this fails.
-      try {
-        const { data: pendingRefs } = await supabase
-          .from('referrals')
-          .select('id, user_id')
-          .eq('referred_email', email)
-          .eq('is_validated', false)
-        if (pendingRefs && pendingRefs.length > 0) {
-          await supabase.from('referrals')
-            .update({ is_validated: true })
-            .eq('referred_email', email)
-            .eq('is_validated', false)
-          const referrerIds = [...new Set(pendingRefs.map((r) => r.user_id))]
-          for (const rid of referrerIds) {
-            const { data: referrer } = await supabase
-              .from('users').select('email').eq('id', rid).maybeSingle()
-            if (referrer?.email) {
-              const tpl = referralJoinedEmail(user.name ?? user.username ?? null)
-              await sendEmail({ to: referrer.email, subject: tpl.subject, html: tpl.html })
-            }
-          }
-        }
-      } catch (refErr) {
-        console.error('referral validation error:', refErr)
-      }
-
       // Send email verification link (best-effort, never blocks registration).
+      // Referral validation happens after email is verified, not here.
       try {
         const verifyUrl = `${SITE_URL}/verify-email?token=${verifyToken}`
         const tpl = verifyEmailEmail(verifyUrl)
@@ -193,6 +165,32 @@ Deno.serve(async (req: Request) => {
         email_verify_token: null,
         email_verify_token_expires_at: null,
       }).eq('id', user.id)
+
+      // Validate any pending referrals for this email now that it's confirmed
+      try {
+        const { data: pendingRefs } = await supabase
+          .from('referrals')
+          .select('id, user_id')
+          .eq('referred_email', user.email)
+          .eq('is_validated', false)
+        if (pendingRefs && pendingRefs.length > 0) {
+          await supabase.from('referrals')
+            .update({ is_validated: true })
+            .eq('referred_email', user.email)
+            .eq('is_validated', false)
+          const referrerIds = [...new Set(pendingRefs.map((r: { user_id: string }) => r.user_id))]
+          for (const rid of referrerIds) {
+            const { data: referrer } = await supabase
+              .from('users').select('email, name, username').eq('id', rid).maybeSingle()
+            if (referrer?.email) {
+              const tpl = referralJoinedEmail(user.first_name ?? user.email ?? null)
+              await sendEmail({ to: referrer.email, subject: tpl.subject, html: tpl.html })
+            }
+          }
+        }
+      } catch (refErr) {
+        console.error('referral validation error:', refErr)
+      }
 
       // Send welcome email now that email is confirmed
       try {
