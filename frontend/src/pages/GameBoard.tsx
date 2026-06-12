@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
+import { APP_VERSION } from '@/lib/version';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -728,6 +729,11 @@ const GameBoard: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Version */}
+      <div className="text-center pb-2">
+        <span className="text-xs text-slate-400 select-none">{APP_VERSION}</span>
       </div>
 
       {/* Celebration */}
