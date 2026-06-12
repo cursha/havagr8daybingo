@@ -1427,6 +1427,67 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
+    // ── GET /my-team ─────────────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-team') {
+      const user = requireAuth(authUser)
+      const weekYear = getCurrentWeekYear()
+
+      // Find the team this player belongs to
+      const { data: memberRow } = await supabase
+        .from('team_members')
+        .select('team_id')
+        .eq('user_id', user.sub)
+        .maybeSingle()
+
+      if (!memberRow) return jsonResponse({ team: null })
+
+      // Get team info + all members
+      const { data: team, error: teamError } = await supabase
+        .from('teams')
+        .select(`
+          id, team_number, team_name,
+          captain:users!captain_user_id(id, player_number, first_name, last_name, username),
+          team_members(
+            id, user_id,
+            users(id, player_number, first_name, last_name, username)
+          )
+        `)
+        .eq('id', memberRow.team_id)
+        .single()
+      if (teamError) throw teamError
+
+      // Fetch current-week card for each member
+      const memberUserIds = (team.team_members ?? []).map((m: any) => m.user_id)
+      const { data: cards } = await supabase
+        .from('player_cards')
+        .select('id, user_id, week_year, cells, win_condition, completed_cells, purchased_cells, referral_cells, is_bingo')
+        .eq('week_year', weekYear)
+        .in('user_id', memberUserIds)
+
+      const cardsByUser: Record<string, any> = {}
+      for (const c of (cards ?? [])) cardsByUser[c.user_id] = c
+
+      const members = (team.team_members ?? []).map((m: any) => ({
+        user_id: m.user_id,
+        player_number: m.users?.player_number ?? null,
+        first_name: m.users?.first_name ?? null,
+        last_name: m.users?.last_name ?? null,
+        username: m.users?.username ?? null,
+        card: cardsByUser[m.user_id] ?? null,
+      }))
+
+      return jsonResponse({
+        team: {
+          id: team.id,
+          team_number: team.team_number,
+          team_name: team.team_name,
+          captain: team.captain,
+          members,
+          week_year: weekYear,
+        },
+      })
+    }
+
     return errorResponse('Not found', 404)
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'status' in err) {

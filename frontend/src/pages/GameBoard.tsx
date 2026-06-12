@@ -7,6 +7,7 @@ import {
   CardData,
   WalletData,
   PendingDeed,
+  MyTeamData,
   generateCard,
   markCell,
   unmarkCell,
@@ -17,6 +18,7 @@ import {
   getMySuggestions,
   getPublicPrize,
   resetCard,
+  getMyTeam,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
@@ -26,7 +28,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Heart, Wallet, ArrowLeft, Send, RefreshCw, Trophy, Users, DollarSign, Sparkles, Target, Lightbulb, Clock, CheckCircle2, XCircle, Shield, Lock, PartyPopper, Medal, LogOut, Printer } from 'lucide-react';
-import { downloadBingoCardPdf } from '@/lib/bingo-pdf';
+import { downloadBingoCardPdf, downloadTeamCardsPdf, TeamMemberCard } from '@/lib/bingo-pdf';
 
 const HEADER_LETTERS = ['GR', '8', 'D', 'A', 'Y'];
 const HEADER_COLORS = [
@@ -70,6 +72,7 @@ const GameBoard: React.FC = () => {
   const [suggesting, setSuggesting] = useState(false);
   const [prize, setPrize] = useState<{ prize_image_url: string; prize_title: string } | null>(null);
   const [playerNumber, setPlayerNumber] = useState<number | null>(null);
+  const [myTeam, setMyTeam] = useState<MyTeamData | null>(null);
 
   useEffect(() => {
     getPublicPrize()
@@ -82,6 +85,9 @@ const GameBoard: React.FC = () => {
       getRegistrationStatus()
         .then((s) => setPlayerNumber((s as any)?.player_number ?? null))
         .catch(() => {});
+      getMyTeam()
+        .then((res) => setMyTeam(res.team))
+        .catch(() => setMyTeam(null));
     }
   }, [user]);
 
@@ -302,6 +308,35 @@ const GameBoard: React.FC = () => {
     }
   };
 
+  const handlePrintTeamPdf = async () => {
+    if (!myTeam) return;
+    try {
+      const winConditionLabel = card?.win_condition
+        ? WIN_CONDITION_LABELS[card.win_condition] || card.win_condition
+        : undefined;
+
+      // Use cached team data — cards were fetched server-side
+      const membersWithCards: TeamMemberCard[] = myTeam.members
+        .filter((m) => m.card != null)
+        .map((m) => {
+          const name = [m.first_name, m.last_name].filter(Boolean).join(' ') || m.username || 'Player';
+          const pn = m.player_number ? `GR8-${m.player_number}` : null;
+          return { playerName: name, playerNumber: pn, card: m.card! };
+        });
+
+      if (membersWithCards.length === 0) {
+        toast.error('No team members have cards generated yet.');
+        return;
+      }
+
+      downloadTeamCardsPdf(myTeam.team_name, membersWithCards, { winConditionLabel });
+      toast.success('Team bingo cards are downloading.');
+    } catch (err) {
+      console.error('Failed to generate team PDF', err);
+      toast.error('Could not generate the team card. Please try again.');
+    }
+  };
+
   const handleLogout = async () => {
     try {
       await logout();
@@ -420,11 +455,23 @@ const GameBoard: React.FC = () => {
               onClick={handlePrintPdf}
               disabled={!card}
               className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
-              title="Print / Save as PDF"
+              title="Print my card as PDF"
             >
               <Printer className="w-3.5 h-3.5 mr-0.5" />
-              <span className="hidden sm:inline">Print PDF</span>
+              <span className="hidden sm:inline">Print Card</span>
             </Button>
+            {myTeam && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handlePrintTeamPdf}
+                className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+                title="Print all team cards (2×2 grid)"
+              >
+                <Users className="w-3.5 h-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Team Print</span>
+              </Button>
+            )}
             <Button
               size="sm"
               variant="outline"

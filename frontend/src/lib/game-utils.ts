@@ -212,6 +212,28 @@ export async function adminRemoveTeamMember(teamId: number, userId: string): Pro
   await apiClient.delete(`/game/admin/teams/${teamId}/members/${userId}`);
 }
 
+export interface MyTeamMember {
+  user_id: string;
+  player_number: number | null;
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  card: CardData | null;
+}
+
+export interface MyTeamData {
+  id: number;
+  team_number: number;
+  team_name: string;
+  captain: { id: string; player_number: number | null; first_name: string | null; last_name: string | null } | null;
+  members: MyTeamMember[];
+  week_year: string;
+}
+
+export async function getMyTeam(): Promise<{ team: MyTeamData | null }> {
+  return apiClient.get<{ team: MyTeamData | null }>('/game/my-team');
+}
+
 export async function adminTriggerWeeklyReset(): Promise<{ sent: number; failed: number; week: string }> {
   return apiClient.post('/weekly-reset', {});
 }
