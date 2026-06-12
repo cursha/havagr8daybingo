@@ -29,8 +29,8 @@ const Login: React.FC = () => {
     }
     setSubmitting(true);
     try {
-      await login({ email: mail, password });
-      toast.success('Welcome back!');
+      const { first_name } = await login({ email: mail, password });
+      toast.success(first_name ? `Welcome back, ${first_name}!` : 'Welcome back!');
       navigate(redirectTo, { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed.';

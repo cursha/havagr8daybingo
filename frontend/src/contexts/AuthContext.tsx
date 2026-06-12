@@ -17,7 +17,7 @@ interface AuthContextType {
   user: AuthUser | null;
   loading: boolean;
   error: string | null;
-  login: (input: LoginInput) => Promise<void>;
+  login: (input: LoginInput) => Promise<{ first_name?: string | null }>;
   register: (input: RegisterInput) => Promise<void>;
   logout: () => Promise<void>;
   refetch: () => Promise<void>;
@@ -59,8 +59,9 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
 
   const login = useCallback(async (input: LoginInput) => {
     setError(null);
-    await authApi.login(input);
+    const data = await authApi.login(input);
     await checkAuthStatus();
+    return { first_name: data.first_name ?? null };
   }, [checkAuthStatus]);
 
   const register = useCallback(async (input: RegisterInput) => {

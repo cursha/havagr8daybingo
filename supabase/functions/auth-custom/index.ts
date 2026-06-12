@@ -139,6 +139,7 @@ Deno.serve(async (req: Request) => {
         email: user.email,
         username: user.username,
         role: user.role,
+        first_name: user.first_name ?? null,
       })
     }
 

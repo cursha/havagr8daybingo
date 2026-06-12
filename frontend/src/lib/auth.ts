@@ -22,6 +22,7 @@ export interface AuthTokenResponse {
   email: string;
   username?: string | null;
   role: string;
+  first_name?: string | null;
 }
 
 export interface RegisterInput {
