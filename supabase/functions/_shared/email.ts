@@ -19,6 +19,7 @@ export async function sendEmail(opts: {
   subject: string
   html: string
   replyTo?: string
+  scheduledAt?: string
 }): Promise<SendResult> {
   const apiKey = Deno.env.get('RESEND_API_KEY')
   if (!apiKey || apiKey === 'FILL_IN_FROM_RESEND_DASHBOARD') {
@@ -35,6 +36,7 @@ export async function sendEmail(opts: {
         subject: opts.subject,
         html: opts.html,
         ...(opts.replyTo ? { reply_to: opts.replyTo } : {}),
+        ...(opts.scheduledAt ? { scheduled_at: opts.scheduledAt } : {}),
       }),
     })
     if (!resp.ok) {
@@ -190,3 +192,172 @@ export function prizeClaimConfirmationEmail(name: string | null): { subject: str
     `),
   }
 }
+
+// Letter Two — Curt's "A Quick Note About Winning". Sent ~24-48 hours after
+// sign-up (scheduled via Resend's scheduled_at at registration time).
+export function secondLetterEmail(_name: string | null): { subject: string; html: string } {
+  return {
+    subject: 'A Quick Note About Winning',
+    html: layout(`
+      <h2 style="margin:0 0 16px;color:#4F46E5;font-size:22px">A Quick Note About Winning</h2>
+
+      <p>If you've spent any time around me, you know I enjoy winning.</p>
+
+      <p>But I want to be very clear about something.</p>
+
+      <p>The number one purpose of HavaGr8Day Bingo is not to win prizes, fill cards, or climb leaderboards.</p>
+
+      <p style="font-weight:bold;color:#1e293b">The number one purpose of HavaGr8Day Bingo is to promote kindness through fun play.</p>
+
+      <p>The game exists to help us pay attention to the world around us and encourage us to do small things that make a big difference in the lives of others. The points, badges, prizes, and bingo cards are simply tools to make the experience more engaging.</p>
+
+      <p>Never let your desire to succeed overshadow the purpose of the game.</p>
+
+      <p>Some weeks you'll look at your card and discover that several challenges happened naturally. You'll complete squares without even trying. Other weeks you'll find yourself one square short, wondering where the opportunities went.</p>
+
+      <p>That's life.</p>
+
+      <p>Some weeks life gives us countless chances to connect, encourage, appreciate, help, and delight others. Some weeks we're busy, distracted, travelling, dealing with challenges, or simply trying to keep our own heads above water.</p>
+
+      <p>Both experiences are perfectly normal.</p>
+
+      <p>This is not a race.</p>
+
+      <p>This is not a test.</p>
+
+      <p>This is certainly not a reason to feel guilty because you didn't complete every challenge on your card.</p>
+
+      <p style="font-weight:bold;color:#1e293b">HavaGr8Day Bingo is meant to add joy to your life, not pressure.</p>
+
+      <p>If a challenge inspires you to make someone's day, fantastic.</p>
+
+      <p>If you complete a row, wonderful.</p>
+
+      <p>If you fill an entire card, congratulations.</p>
+
+      <p>But if all you accomplish this week is becoming a little more aware of the people around you, then you've already won.</p>
+
+      <p style="font-weight:bold;color:#1e293b">The real prize has never been the prize.</p>
+
+      <p>The real prize is becoming the kind of person who naturally looks for opportunities to make the world a little brighter.</p>
+
+      <p>So play hard.</p>
+
+      <p>Have fun.</p>
+
+      <p>Celebrate your successes.</p>
+
+      <p>Laugh when things don't go as planned.</p>
+
+      <p>And remember that the greatest victories in this game are often the ones that never appear on a scoreboard.</p>
+
+      <p>Thank you for being part of this growing community of people who believe that small acts of kindness can create big changes.</p>
+
+      <p>Now go out there, enjoy the journey, and have a GR8 Day.</p>
+
+      <p style="margin-top:20px">
+        <span style="font-weight:bold;color:#1e293b">Curt Skene</span><br/>
+        <span style="color:#64748b">Founder, HavaGr8Day Bingo</span>
+      </p>
+    `),
+  }
+}
+
+// Letter Three — Curt's "A Few Fun Features You Should Know About". Sent 1-2
+// days after Letter Two (scheduled ~48h after sign-up via Resend scheduled_at).
+export function thirdLetterEmail(_name: string | null): { subject: string; html: string } {
+  return {
+    subject: 'A Few Fun Features You Should Know About',
+    html: layout(`
+      <h2 style="margin:0 0 16px;color:#4F46E5;font-size:22px">A Few Fun Features You Should Know About</h2>
+
+      <p>One thing you'll quickly discover about HavaGr8Day Bingo is that we take kindness seriously.</p>
+
+      <p>We don't take ourselves too seriously.</p>
+
+      <p>While our mission is to encourage people to create great days for others, we also want the game itself to be fun, surprising, and filled with a few twists along the way.</p>
+
+      <p>Here are three features you'll want to know about.</p>
+
+      <h3 style="margin:20px 0 8px;color:#1e293b;font-size:18px">Pick Three</h3>
+
+      <p>Let's face it.</p>
+
+      <p>Sometimes life gets in the way.</p>
+
+      <p>You may receive a challenge that simply doesn't fit your week, your schedule, your personality, or your circumstances.</p>
+
+      <p>No problem.</p>
+
+      <p>That's why we've included the Pick Three option.</p>
+
+      <p>When you use it, we'll instantly replace three squares on your card with three brand-new challenges.</p>
+
+      <p>Notice I said three.</p>
+
+      <p>Not one.</p>
+
+      <p>Not two.</p>
+
+      <p>Three.</p>
+
+      <p>The feature is called Pick Three for a reason.</p>
+
+      <p>Use it wisely and you may discover three new opportunities to make someone's day great.</p>
+
+      <h3 style="margin:20px 0 8px;color:#1e293b;font-size:18px">The Bomb Square</h3>
+
+      <p>Now for the feature that tends to surprise people.</p>
+
+      <p>Approximately one in every hundred cards contains a Bomb Square.</p>
+
+      <p>If you happen to find one and decide to click it, your entire card is instantly rewritten.</p>
+
+      <p>Every square.</p>
+
+      <p>Every challenge.</p>
+
+      <p>Everything.</p>
+
+      <p>Why would we do that?</p>
+
+      <p>Because life doesn't always go according to plan.</p>
+
+      <p>Sometimes the best adventures begin when your plans are blown up and you're forced to start fresh.</p>
+
+      <p>Don't worry. The new card will be every bit as playable as the old one.</p>
+
+      <p>Just consider it an unexpected plot twist in your HavaGr8Day journey.</p>
+
+      <h3 style="margin:20px 0 8px;color:#1e293b;font-size:18px">Bonus Squares</h3>
+
+      <p>Every now and then, the HavaGr8Day team may drop a little surprise into your spending account.</p>
+
+      <p>Think of it as a random act of kindness from us to you.</p>
+
+      <p>These bonus credits can't be withdrawn, transferred, or spent on groceries.</p>
+
+      <p>But they can be used within the game to purchase an extra square or two and add a little more fun to your card.</p>
+
+      <p>After all, if we're asking you to make other people's days great, it only seems fair that we occasionally try to make yours a little better too.</p>
+
+      <p>As HavaGr8Day Bingo continues to grow, you'll see new features, new surprises, and new ways to play.</p>
+
+      <p>Our goal is simple.</p>
+
+      <p>Create a game that's fun enough to keep you coming back and meaningful enough to make a difference in the world around you.</p>
+
+      <p>Thank you for being part of the adventure.</p>
+
+      <p>Now get out there, complete a few squares, make someone's day, and most importantly...</p>
+
+      <p style="font-size:18px;font-weight:bold;color:#4FB3E8">Have a GR8 Day!</p>
+
+      <p style="margin-top:20px">
+        <span style="font-weight:bold;color:#1e293b">Curt Skene</span><br/>
+        <span style="color:#64748b">Founder, HavaGr8Day Bingo</span>
+      </p>
+    `),
+  }
+}
+

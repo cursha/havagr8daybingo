@@ -1,7 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { createAccessToken, getAuthUser, requireAuth } from '../_shared/auth.ts'
 import { getSupabase, getSubPath } from '../_shared/db.ts'
-import { sendEmail, referralJoinedEmail, welcomeEmail, verifyEmailEmail, newPlayerNotificationEmail } from '../_shared/email.ts'
+import { sendEmail, referralJoinedEmail, welcomeEmail, verifyEmailEmail, newPlayerNotificationEmail, secondLetterEmail, thirdLetterEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 const ADMIN_EMAIL = 'curt.skene@curtskene.com'
@@ -197,6 +197,24 @@ Deno.serve(async (req: Request) => {
       try {
         const tpl = welcomeEmail(user.first_name ?? null)
         await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+      } catch { /* silent */ }
+
+      // Schedule Curt's follow-up letters via Resend scheduled delivery:
+      // Letter 2 "A Quick Note About Winning" ~24h after verifying,
+      // Letter 3 "A Few Fun Features" ~48h after. Best-effort, never blocks.
+      try {
+        const tpl2 = secondLetterEmail(user.first_name ?? null)
+        await sendEmail({
+          to: user.email, subject: tpl2.subject, html: tpl2.html,
+          scheduledAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+        })
+      } catch { /* silent */ }
+      try {
+        const tpl3 = thirdLetterEmail(user.first_name ?? null)
+        await sendEmail({
+          to: user.email, subject: tpl3.subject, html: tpl3.html,
+          scheduledAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+        })
       } catch { /* silent */ }
 
       // Notify admin
