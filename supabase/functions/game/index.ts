@@ -1,5 +1,5 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
-import { getAuthUser, requireAuth } from '../_shared/auth.ts'
+import { getAuthUser, requireAuth, requireAdmin } from '../_shared/auth.ts'
 import { getSupabase, getSubPath, matchPath } from '../_shared/db.ts'
 import { sendEmail, passwordResetEmail, referralInviteEmail, bingoWinEmail, prizeClaimConfirmationEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
@@ -1214,11 +1214,22 @@ Deno.serve(async (req: Request) => {
       const limit = Math.min(Math.max(1, limitParam), 500)
       const { data, error } = await supabase
         .from('cell_mark_log')
-        .select('*, users(username, email)')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(limit)
       if (error) throw error
-      return jsonResponse({ logs: data ?? [] })
+      // cell_mark_log.user_id has no FK to users, so PostgREST can't embed it.
+      // Look up the usernames/emails in a second query and attach them.
+      const logRows = data ?? []
+      const ids = [...new Set(logRows.map((l) => l.user_id).filter(Boolean))]
+      const userMap = new Map<string, { username: string | null; email: string | null }>()
+      if (ids.length > 0) {
+        const { data: us } = await supabase
+          .from('users').select('id, username, email').in('id', ids)
+        for (const u of us ?? []) userMap.set(u.id, { username: u.username ?? null, email: u.email ?? null })
+      }
+      const logs = logRows.map((l) => ({ ...l, users: userMap.get(l.user_id) ?? null }))
+      return jsonResponse({ logs })
     }
 
     // ── POST /wallet/create-payment-intent ───────────────────────────────────
