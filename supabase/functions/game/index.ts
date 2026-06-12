@@ -23,13 +23,13 @@ interface Cell {
 // ── Badge System ─────────────────────────────────────────────────────────────
 function getBadge(totalDeeds: number): { name: string; emoji: string; next_name: string | null; next_emoji: string | null; deeds_to_next: number | null } {
   const tiers = [
-    { min: 0,   name: 'Seedling',        emoji: '🌱' },
-    { min: 10,  name: 'Do-Gooder',       emoji: '⭐' },
-    { min: 25,  name: 'Kind Soul',       emoji: '🌟' },
-    { min: 50,  name: 'Gr8 Neighbour',   emoji: '💫' },
-    { min: 100, name: 'Community Hero',  emoji: '🏅' },
-    { min: 200, name: 'Legend',          emoji: '🎖️' },
-    { min: 500, name: 'Gr8Day Champion', emoji: '👑' },
+    { min: 0,   name: 'Newcomer',  emoji: '🌱' },
+    { min: 5,   name: 'Starter',   emoji: '⭐' },
+    { min: 10,  name: 'Builder',   emoji: '🔨' },
+    { min: 25,  name: 'Champion',  emoji: '🏆' },
+    { min: 50,  name: 'Hero',      emoji: '🦸' },
+    { min: 75,  name: 'Legend',    emoji: '🌟' },
+    { min: 100, name: 'Expert',    emoji: '👑' },
   ]
   let current = tiers[0]
   let nextTier: typeof tiers[0] | null = tiers[1]

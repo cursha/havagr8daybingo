@@ -50,7 +50,7 @@ const Profile: React.FC = () => {
   const getProgress = () => {
     if (!badge) return { pct: 0, done: 0, needed: 0 };
     if (isMaxBadge) return { pct: 100, done: badge.total_deeds, needed: 0 };
-    const tiers = [0, 10, 25, 50, 100, 200, 500];
+    const tiers = [0, 5, 10, 25, 50, 75, 100];
     let tierStart = 0;
     for (let i = tiers.length - 1; i >= 0; i--) {
       if (badge.total_deeds >= tiers[i]) {
@@ -176,13 +176,13 @@ const Profile: React.FC = () => {
           <div className="bg-white/5 border border-white/10 rounded-xl p-4 space-y-2">
             <p className="text-white/50 text-xs uppercase tracking-widest mb-3">Badge Tiers</p>
             {[
-              { min: 1, max: 9, name: 'Seedling', emoji: '🌱' },
-              { min: 10, max: 24, name: 'Do-Gooder', emoji: '⭐' },
-              { min: 25, max: 49, name: 'Kind Soul', emoji: '🌟' },
-              { min: 50, max: 99, name: 'Gr8 Neighbour', emoji: '💫' },
-              { min: 100, max: 199, name: 'Community Hero', emoji: '🏅' },
-              { min: 200, max: 499, name: 'Legend', emoji: '🎖️' },
-              { min: 500, max: null, name: 'Gr8Day Champion', emoji: '👑' },
+              { min: 0,   max: 4,    name: 'Newcomer',  emoji: '🌱' },
+              { min: 5,   max: 9,    name: 'Starter',   emoji: '⭐' },
+              { min: 10,  max: 24,   name: 'Builder',   emoji: '🔨' },
+              { min: 25,  max: 49,   name: 'Champion',  emoji: '🏆' },
+              { min: 50,  max: 74,   name: 'Hero',      emoji: '🦸' },
+              { min: 75,  max: 99,   name: 'Legend',    emoji: '🌟' },
+              { min: 100, max: null, name: 'Expert',    emoji: '👑' },
             ].map((tier) => {
               const isActive = badge && badge.badge_name === tier.name;
               return (
