@@ -19,6 +19,7 @@ import {
   getPublicPrize,
   resetCard,
   getMyTeam,
+  getMyTrades,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
@@ -73,6 +74,7 @@ const GameBoard: React.FC = () => {
   const [prize, setPrize] = useState<{ prize_image_url: string; prize_title: string } | null>(null);
   const [playerNumber, setPlayerNumber] = useState<number | null>(null);
   const [myTeam, setMyTeam] = useState<MyTeamData | null>(null);
+  const [pendingTradeCount, setPendingTradeCount] = useState(0);
 
   useEffect(() => {
     getPublicPrize()
@@ -88,6 +90,15 @@ const GameBoard: React.FC = () => {
       getMyTeam()
         .then((res) => setMyTeam(res.team))
         .catch(() => setMyTeam(null));
+      getMyTrades()
+        .then((res) => {
+          const userId = (user as any)?.sub ?? (user as any)?.id ?? '';
+          const pending = res.trades.filter(
+            (t) => t.to_user_id === userId && t.status === 'pending'
+          ).length;
+          setPendingTradeCount(pending);
+        })
+        .catch(() => setPendingTradeCount(0));
     }
   }, [user]);
 
@@ -470,6 +481,23 @@ const GameBoard: React.FC = () => {
               >
                 <Users className="w-3.5 h-3.5 mr-0.5" />
                 <span className="hidden sm:inline">Team Print</span>
+              </Button>
+            )}
+            {myTeam && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => navigate('/trade')}
+                className="relative border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+                title="Trade a square with a teammate"
+              >
+                <Users className="w-3.5 h-3.5 mr-0.5" />
+                <span className="hidden sm:inline">Trade</span>
+                {pendingTradeCount > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                    {pendingTradeCount}
+                  </span>
+                )}
               </Button>
             )}
             <Button

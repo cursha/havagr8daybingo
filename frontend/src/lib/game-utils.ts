@@ -499,6 +499,42 @@ export async function registerProfile(payload: {
   return apiClient.post<RegisterProfileResult>('/registration/register', payload);
 }
 
+// ---------- Square Trades ----------
+export interface TradeOffer {
+  id: number;
+  week_year: string;
+  from_user_id: string;
+  to_user_id: string;
+  from_card_id: number;
+  to_card_id: number;
+  from_cell_index: number;
+  to_cell_index: number;
+  from_deed_text: string;
+  to_deed_text: string;
+  from_deed_id: number | null;
+  to_deed_id: number | null;
+  status: 'pending' | 'accepted' | 'rejected' | 'cancelled' | 'expired';
+  created_at: string;
+  from_user?: { first_name: string | null; last_name: string | null; player_number: number | null };
+  to_user?: { first_name: string | null; last_name: string | null; player_number: number | null };
+}
+
+export async function getMyTrades(): Promise<{ trades: TradeOffer[] }> {
+  return apiClient.get<{ trades: TradeOffer[] }>('/game/my-team/trades');
+}
+
+export async function createTrade(payload: { to_user_id: string; from_cell_index: number; to_cell_index: number }): Promise<{ success: boolean; trade: TradeOffer }> {
+  return apiClient.post<{ success: boolean; trade: TradeOffer }>('/game/my-team/trades', payload);
+}
+
+export async function acceptTrade(id: number): Promise<{ success: boolean }> {
+  return apiClient.post<{ success: boolean }>(`/game/my-team/trades/${id}/accept`, {});
+}
+
+export async function rejectOrCancelTrade(id: number): Promise<{ success: boolean }> {
+  return apiClient.post<{ success: boolean }>(`/game/my-team/trades/${id}/reject`, {});
+}
+
 // Helper: Check if a cell is "completed" (marked, purchased, referral free, or free space)
 export function isCellCompleted(
   cellIndex: number,

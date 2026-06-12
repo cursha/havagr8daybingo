@@ -1488,6 +1488,240 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // ── GET /my-team/trades ───────────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-team/trades') {
+      const user = requireAuth(authUser)
+      const weekYear = getCurrentWeekYear()
+
+      const { data: trades, error: tradesErr } = await supabase
+        .from('square_trades')
+        .select('*')
+        .or(`from_user_id.eq.${user.sub},to_user_id.eq.${user.sub}`)
+        .eq('week_year', weekYear)
+        .order('created_at', { ascending: false })
+      if (tradesErr) throw tradesErr
+
+      // Collect unique user IDs to join
+      const userIds = new Set<string>()
+      for (const t of trades ?? []) {
+        userIds.add(t.from_user_id)
+        userIds.add(t.to_user_id)
+      }
+      const { data: userRows } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, player_number')
+        .in('id', [...userIds])
+      const usersById: Record<string, { first_name: string | null; last_name: string | null; player_number: number | null }> = {}
+      for (const u of userRows ?? []) usersById[u.id] = { first_name: u.first_name, last_name: u.last_name, player_number: u.player_number }
+
+      const enriched = (trades ?? []).map((t) => ({
+        ...t,
+        from_user: usersById[t.from_user_id] ?? null,
+        to_user: usersById[t.to_user_id] ?? null,
+      }))
+
+      return jsonResponse({ trades: enriched })
+    }
+
+    // ── POST /my-team/trades (create offer) ───────────────────────────────────
+    if (method === 'POST' && path === '/my-team/trades') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { to_user_id, from_cell_index, to_cell_index } = body
+      if (!to_user_id || from_cell_index == null || to_cell_index == null) {
+        return errorResponse('to_user_id, from_cell_index, and to_cell_index are required', 400)
+      }
+      if (to_user_id === user.sub) return errorResponse('You cannot trade with yourself', 400)
+
+      const weekYear = getCurrentWeekYear()
+
+      // Check user is on a team
+      const { data: fromMember } = await supabase
+        .from('team_members').select('team_id').eq('user_id', user.sub).maybeSingle()
+      if (!fromMember) return errorResponse('You are not on a team', 400)
+
+      // Check to_user is on the same team
+      const { data: toMember } = await supabase
+        .from('team_members').select('team_id').eq('user_id', to_user_id).maybeSingle()
+      if (!toMember || toMember.team_id !== fromMember.team_id) {
+        return errorResponse('That player is not on your team', 400)
+      }
+
+      // Check no active pending outgoing trade this week
+      const { data: existingPending } = await supabase
+        .from('square_trades')
+        .select('id')
+        .eq('from_user_id', user.sub)
+        .eq('week_year', weekYear)
+        .eq('status', 'pending')
+        .maybeSingle()
+      if (existingPending) return errorResponse('You already have an active pending trade offer this week', 400)
+
+      // Count completed trades for user this week (accepted, either from or to)
+      const { count: completedCount } = await supabase
+        .from('square_trades')
+        .select('id', { count: 'exact', head: true })
+        .eq('week_year', weekYear)
+        .eq('status', 'accepted')
+        .or(`from_user_id.eq.${user.sub},to_user_id.eq.${user.sub}`)
+      if ((completedCount ?? 0) >= 1) return errorResponse('Trade limit reached for this week', 400)
+
+      // Load from_card
+      const { data: fromCard } = await supabase
+        .from('player_cards').select('*').eq('user_id', user.sub).eq('week_year', weekYear).maybeSingle()
+      if (!fromCard) return errorResponse('You do not have a card this week', 400)
+
+      // Load to_card
+      const { data: toCard } = await supabase
+        .from('player_cards').select('*').eq('user_id', to_user_id).eq('week_year', weekYear).maybeSingle()
+      if (!toCard) return errorResponse('That player does not have a card this week', 400)
+
+      const fromCells: Cell[] = JSON.parse(fromCard.card_data)
+      const toCells: Cell[] = JSON.parse(toCard.card_data)
+
+      const fromCell = fromCells[from_cell_index]
+      const toCell = toCells[to_cell_index]
+
+      if (!fromCell) return errorResponse('Invalid from_cell_index', 400)
+      if (!toCell) return errorResponse('Invalid to_cell_index', 400)
+
+      // Validate from_cell
+      const fromCompleted = parseJsonArr(fromCard.completed_cells)
+      const fromPurchased = parseJsonArr(fromCard.purchased_cells)
+      const fromReferral = parseJsonArr(fromCard.referral_cells)
+      if (fromCell.is_free_space) return errorResponse('Cannot trade a free space', 400)
+      if (fromPurchased.includes(from_cell_index)) return errorResponse('Cannot trade a purchased square', 400)
+      if (fromReferral.includes(from_cell_index)) return errorResponse('Cannot trade a referral square', 400)
+      if (fromCompleted.includes(from_cell_index)) return errorResponse('Cannot trade a completed square', 400)
+
+      // Validate to_cell
+      const toCompleted = parseJsonArr(toCard.completed_cells)
+      const toPurchased = parseJsonArr(toCard.purchased_cells)
+      const toReferral = parseJsonArr(toCard.referral_cells)
+      if (toCell.is_free_space) return errorResponse('Cannot trade a free space', 400)
+      if (toPurchased.includes(to_cell_index)) return errorResponse('Cannot trade a purchased square', 400)
+      if (toReferral.includes(to_cell_index)) return errorResponse('Cannot trade a referral square', 400)
+      if (toCompleted.includes(to_cell_index)) return errorResponse('Cannot trade a completed square', 400)
+
+      const { data: trade, error: tradeErr } = await supabase
+        .from('square_trades')
+        .insert({
+          week_year: weekYear,
+          from_user_id: user.sub,
+          to_user_id,
+          from_card_id: fromCard.id,
+          to_card_id: toCard.id,
+          from_cell_index,
+          to_cell_index,
+          from_deed_text: fromCell.deed_text,
+          to_deed_text: toCell.deed_text,
+          from_deed_id: fromCell.deed_id ?? null,
+          to_deed_id: toCell.deed_id ?? null,
+          status: 'pending',
+        })
+        .select()
+        .single()
+      if (tradeErr) throw tradeErr
+
+      return jsonResponse({ success: true, trade })
+    }
+
+    // ── POST /my-team/trades/:id/accept ───────────────────────────────────────
+    const tradeAcceptMatch = path.match(/^\/my-team\/trades\/(\d+)\/accept$/)
+    if (method === 'POST' && tradeAcceptMatch) {
+      const user = requireAuth(authUser)
+      const tradeId = parseInt(tradeAcceptMatch[1])
+
+      const { data: trade } = await supabase
+        .from('square_trades').select('*').eq('id', tradeId).maybeSingle()
+      if (!trade) return errorResponse('Trade not found', 404)
+      if (trade.to_user_id !== user.sub) return errorResponse('Only the recipient can accept this trade', 403)
+      if (trade.status !== 'pending') return errorResponse('Trade is no longer pending', 400)
+
+      const expiresAt = new Date(trade.created_at).getTime() + 48 * 60 * 60 * 1000
+      if (Date.now() > expiresAt) {
+        await supabase.from('square_trades').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', tradeId)
+        return errorResponse('Trade offer has expired', 400)
+      }
+
+      // Load both cards
+      const { data: fromCard } = await supabase
+        .from('player_cards').select('*').eq('id', trade.from_card_id).maybeSingle()
+      const { data: toCard } = await supabase
+        .from('player_cards').select('*').eq('id', trade.to_card_id).maybeSingle()
+      if (!fromCard || !toCard) return errorResponse('One or both cards not found', 404)
+
+      // Re-validate cells are still uncompleted
+      const fromCompleted = parseJsonArr(fromCard.completed_cells)
+      const toCompleted = parseJsonArr(toCard.completed_cells)
+      if (fromCompleted.includes(trade.from_cell_index)) {
+        return errorResponse('The offerer\'s square has already been completed', 400)
+      }
+      if (toCompleted.includes(trade.to_cell_index)) {
+        return errorResponse('Your square has already been completed', 400)
+      }
+
+      // Execute swap in JS
+      const fromCells: Cell[] = JSON.parse(fromCard.card_data)
+      const toCells: Cell[] = JSON.parse(toCard.card_data)
+
+      const fromCell = { ...fromCells[trade.from_cell_index] }
+      const toCell = { ...toCells[trade.to_cell_index] }
+
+      // Swap deed_text and deed_id, keep index and other flags
+      fromCells[trade.from_cell_index] = {
+        ...fromCell,
+        deed_text: toCell.deed_text,
+        deed_id: toCell.deed_id,
+        deed_text_long: toCell.deed_text_long ?? null,
+        quantity: toCell.quantity ?? 1,
+      }
+      toCells[trade.to_cell_index] = {
+        ...toCell,
+        deed_text: fromCell.deed_text,
+        deed_id: fromCell.deed_id,
+        deed_text_long: fromCell.deed_text_long ?? null,
+        quantity: fromCell.quantity ?? 1,
+      }
+
+      // Update both player_cards
+      await supabase.from('player_cards')
+        .update({ card_data: JSON.stringify(fromCells), updated_at: new Date().toISOString() })
+        .eq('id', fromCard.id)
+      await supabase.from('player_cards')
+        .update({ card_data: JSON.stringify(toCells), updated_at: new Date().toISOString() })
+        .eq('id', toCard.id)
+
+      // Update trade status
+      await supabase.from('square_trades')
+        .update({ status: 'accepted', updated_at: new Date().toISOString() })
+        .eq('id', tradeId)
+
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /my-team/trades/:id/reject ───────────────────────────────────────
+    const tradeRejectMatch = path.match(/^\/my-team\/trades\/(\d+)\/reject$/)
+    if (method === 'POST' && tradeRejectMatch) {
+      const user = requireAuth(authUser)
+      const tradeId = parseInt(tradeRejectMatch[1])
+
+      const { data: trade } = await supabase
+        .from('square_trades').select('*').eq('id', tradeId).maybeSingle()
+      if (!trade) return errorResponse('Trade not found', 404)
+      if (trade.from_user_id !== user.sub && trade.to_user_id !== user.sub) {
+        return errorResponse('You are not part of this trade', 403)
+      }
+      if (trade.status !== 'pending') return errorResponse('Trade is no longer pending', 400)
+
+      const newStatus = trade.from_user_id === user.sub ? 'cancelled' : 'rejected'
+      await supabase.from('square_trades')
+        .update({ status: newStatus, updated_at: new Date().toISOString() })
+        .eq('id', tradeId)
+
+      return jsonResponse({ success: true })
+    }
+
     return errorResponse('Not found', 404)
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'status' in err) {
