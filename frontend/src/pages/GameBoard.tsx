@@ -425,6 +425,9 @@ const GameBoard: React.FC = () => {
         ...card.completed_cells,
         ...card.purchased_cells,
         ...card.referral_cells,
+        // The I DARE YA centre is a free space — it always counts (toward both
+        // the progress bar and Bingo), even though it is never "marked".
+        ...card.cells.filter((c) => c.is_free_space).map((c) => c.index),
       ]).size
     : 0;
 

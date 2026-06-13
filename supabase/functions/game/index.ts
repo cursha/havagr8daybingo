@@ -129,6 +129,12 @@ function parseJsonArr(raw: string | null | undefined): number[] {
   try { return JSON.parse(raw ?? '[]') } catch { return [] }
 }
 
+/** Free-space cells (the I DARE YA centre) always count toward Bingo, even
+ *  though they are never "marked". Returns their indices from the card data. */
+function freeSpaceIndices(cells: Cell[]): number[] {
+  return cells.filter((c) => c.is_free_space).map((c) => c.index)
+}
+
 const WIN_LABELS: Record<string, string> = {
   one_line: 'One Line', two_lines: 'Two Lines', four_corners: 'Four Corners',
   x_pattern: 'X Pattern', around_the_edges: 'Around the Edges', fill_card: 'Fill the Card',
@@ -227,7 +233,7 @@ Deno.serve(async (req: Request) => {
           const completed = parseJsonArr(existing.completed_cells)
           const purchased = parseJsonArr(existing.purchased_cells)
           const referral = parseJsonArr(existing.referral_cells)
-          const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+          const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
           existing.is_bingo = checkBingo(allCompleted, existing.win_condition)
           existing.updated_at = new Date().toISOString()
           await supabase.from('player_cards').update({
@@ -307,10 +313,10 @@ Deno.serve(async (req: Request) => {
       for (let i = 0; i < 25; i++) {
         if (i === 12) {
           cells.push({
-            index: 12, deed_text: 'Refer a Player',
-            deed_text_long: 'Invite a friend to play! Submit a valid referral and this square marks itself complete.',
-            deed_id: null, is_free_space: false, is_purchasable: false, purchase_price: null,
-            is_referral_free: true, is_secret: false, secret_reward: null, quantity: 1,
+            index: 12, deed_text: 'I Dare Ya!',
+            deed_text_long: 'Tap the centre square to take the I DARE YA challenge — you might win a little, lose a little, or get dared to refer a friend. The centre is a free space and always counts toward your Bingo.',
+            deed_id: null, is_free_space: true, is_purchasable: false, purchase_price: null,
+            is_referral_free: false, is_secret: false, secret_reward: null, quantity: 1,
           })
         } else {
           const deed = selectedDeeds[deedIdx++]
@@ -421,7 +427,7 @@ Deno.serve(async (req: Request) => {
       }
 
       completed.push(cell_index)
-      const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -519,7 +525,7 @@ Deno.serve(async (req: Request) => {
       purchased.push(cell_index)
       const completed = parseJsonArr(card.completed_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1156,7 +1162,7 @@ Deno.serve(async (req: Request) => {
       const updatedCompleted = completed.filter((i) => i !== cell_index)
       const purchased = parseJsonArr(card.purchased_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1186,7 +1192,7 @@ Deno.serve(async (req: Request) => {
       const updatedCompleted = completed.filter((i: number) => i !== cell_index)
       const purchased = parseJsonArr(card.purchased_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1881,16 +1887,35 @@ Deno.serve(async (req: Request) => {
       }
       const currentBalance = parseFloat(wallet.balance)
 
-      // Pick outcome. Rule 1: if remove_funds would take wallet negative, re-roll
-      // to a non-remove_funds outcome (hardcoded, not configurable).
-      let chosen = pickOutcome(outcomes)
-      if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
-        const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
-        if (safePool.length > 0) {
-          chosen = pickOutcome(safePool)
-        } else {
-          // All outcomes are remove_funds (pathological config) — fall back to nothing.
-          chosen = { type: 'nothing', weight: 1, amount: 0 }
+      // ── "Refer a Player" cadence (Curt's rule, table-driven) ────────────────
+      // On the player's Nth dare spin (config dare_refer_forced_spin, default 3)
+      // the spin is GUARANTEED to land on Refer a Player ("they've played N
+      // times, clearly they enjoy it — now invite a friend"). On every other
+      // spin, Refer a Player is just one weighted outcome (~15-20%, table-driven
+      // via dare_outcome_refer_player). Set the threshold to 0 to disable forcing.
+      const { data: spinUser } = await supabase
+        .from('users').select('dare_total_spins').eq('id', user.sub).maybeSingle()
+      const priorSpins: number = spinUser?.dare_total_spins ?? 0
+      const thisSpinNumber = priorSpins + 1
+      const { data: forcedCfg } = await supabase
+        .from('game_configs').select('config_value')
+        .eq('config_key', 'dare_refer_forced_spin').maybeSingle()
+      const forcedReferSpin = parseInt(forcedCfg?.config_value ?? '3') || 0
+
+      // Pick outcome.
+      let chosen: Outcome
+      if (forcedReferSpin > 0 && thisSpinNumber === forcedReferSpin) {
+        chosen = outcomes.find((o) => o.type === 'refer_player')
+          ?? { type: 'refer_player', label: 'Refer a Player!', weight: 1, amount: 0 }
+      } else {
+        chosen = pickOutcome(outcomes)
+        // Rule 1: if remove_funds would take the wallet negative, re-roll to a
+        // non-remove_funds outcome (hardcoded, not configurable).
+        if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
+          const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
+          chosen = safePool.length > 0
+            ? pickOutcome(safePool)
+            : { type: 'nothing', label: 'No Effect', weight: 1, amount: 0 }
         }
       }
 
@@ -1977,7 +2002,7 @@ Deno.serve(async (req: Request) => {
             // Rule 2: swap_square ALWAYS un-marks the swapped cell.
             // Remove it from completed_cells so the player must complete the new deed.
             const updatedCompleted = completed.filter((i) => i !== targetCell.index)
-            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
             const isBingo = checkBingo(allCompleted, card.win_condition)
 
             await supabase.from('player_cards').update({
@@ -2014,7 +2039,7 @@ Deno.serve(async (req: Request) => {
           crypto.getRandomValues(randBuf4)
           const markCell = markableCells[Math.floor((randBuf4[0] / 4_294_967_296) * markableCells.length)]
           const updatedCompleted2 = [...completed, markCell.index]
-          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral])]
+          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
           const isBingo2 = checkBingo(allCompleted2, card.win_condition)
 
           await supabase.from('player_cards').update({
@@ -2044,6 +2069,12 @@ Deno.serve(async (req: Request) => {
       await supabase.from('player_cards')
         .update({ dare_clicks: dareClicks + 1, updated_at: new Date().toISOString() })
         .eq('id', card_id)
+
+      // Increment the player's cumulative dare-spin count (drives the forced
+      // "Refer a Player" cadence above — resets never; counts across weeks).
+      await supabase.from('users')
+        .update({ dare_total_spins: thisSpinNumber })
+        .eq('id', user.sub)
 
       result.dare_clicks_used = dareClicks + 1
       result.dare_clicks_remaining = Math.max(0, maxSpins - (dareClicks + 1))
