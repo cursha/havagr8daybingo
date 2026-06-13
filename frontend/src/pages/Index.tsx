@@ -3,7 +3,8 @@ import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/contexts/AuthContext';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { Heart, Star, Trophy, Wallet, Shield, Users, Gift, Medal, LogOut } from 'lucide-react';
+import { Heart, Star, Trophy, Wallet, Shield, Users, Gift, Medal, LogOut, BookOpen, ArrowRight, Check } from 'lucide-react';
+import Footer from '@/components/Footer';
 import RegistrationModal from '@/components/RegistrationModal';
 import { getPublicPrize } from '@/lib/game-utils';
 
@@ -103,6 +104,16 @@ const Index: React.FC = () => {
             <Button
               variant="ghost"
               size="sm"
+              onClick={() => navigate('/welcome')}
+              className="text-white hover:bg-white/20 hover:text-white px-2 sm:px-3"
+              title="Our Story"
+            >
+              <BookOpen className="w-4 h-4 sm:mr-1" />
+              <span className="hidden sm:inline">Our Story</span>
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => navigate('/leaderboard')}
               className="text-white hover:bg-white/20 hover:text-white px-2 sm:px-3"
               title="Leaderboard"
@@ -181,6 +192,62 @@ const Index: React.FC = () => {
             />
           </div>
 
+          {/* Tagline */}
+          <h1
+            className="text-3xl sm:text-5xl font-black text-white mb-3"
+            style={{ textShadow: '0 2px 0 rgba(0,0,0,0.25)' }}
+          >
+            Kickass Bingo with a Gr8day Twist!
+          </h1>
+          <p className="text-white/90 text-base sm:text-lg max-w-2xl mx-auto mb-2">
+            Do real acts of kindness to mark your squares, win prizes, and help start a global
+            movement of great days.
+          </p>
+          <p className="text-yellow-200 text-sm sm:text-base font-semibold max-w-2xl mx-auto mb-7">
+            Join the global movement to make Gr8days.
+          </p>
+
+          {/* Mini game-board preview — real deeds */}
+          <div className="flex justify-center mb-8">
+            <div className="bg-white/15 backdrop-blur-sm p-3 rounded-2xl border border-white/30 shadow-xl">
+              <div className="grid grid-cols-5 gap-1.5">
+                {[
+                  'Hold the door', 'Give a compliment', 'Leave a tip', 'Call a friend', 'Pay it forward',
+                  'Help a neighbour', 'Thank a teacher', 'Donate', 'Write a note', 'Share a meal',
+                  'Pick up litter', 'Encourage someone', 'REFER A PLAYER', 'Buy a coffee', 'Smile',
+                  'Check in on someone', 'Give a hug', 'Volunteer', 'Hold space', 'Say thank you',
+                  'Lend a hand', 'Praise effort', 'Be patient', 'Forgive', 'Listen',
+                ].map((deed, i) => {
+                  const marked = [0, 6, 8, 16, 18, 24].includes(i);
+                  const center = i === 12;
+                  return (
+                    <div
+                      key={i}
+                      className={`relative w-[52px] h-[52px] sm:w-[64px] sm:h-[64px] rounded-md flex items-center justify-center p-1 text-center leading-tight ${
+                        center
+                          ? 'bg-gradient-to-br from-amber-400 to-rose-500 text-white'
+                          : marked
+                          ? 'bg-emerald-400 text-white'
+                          : 'bg-white/90 text-slate-700'
+                      }`}
+                    >
+                      <span className="text-[7px] sm:text-[8px] font-semibold">{deed}</span>
+                      {center && (
+                        <Heart className="absolute top-0.5 right-0.5 w-2.5 h-2.5 text-white fill-white" />
+                      )}
+                      {marked && (
+                        <Check className="absolute top-0.5 right-0.5 w-3 h-3 text-white" strokeWidth={3} />
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-white/90 text-[11px] sm:text-xs font-medium mt-2 text-center">
+                Real deeds. Mark a square by actually doing it. Centre = Refer a Player.
+              </p>
+            </div>
+          </div>
+
           {/* CTA */}
           <div className="flex flex-col items-center gap-4">
             <Button
@@ -206,6 +273,20 @@ const Index: React.FC = () => {
             <div className="inline-flex items-center gap-2 bg-white/20 text-white px-4 py-1.5 rounded-full text-sm font-semibold mt-3 backdrop-blur-sm border border-white/30">
               <Star className="w-4 h-4 fill-yellow-300 text-yellow-300" /> New game starts every Monday
             </div>
+
+            {/* Read our story callout */}
+            <button
+              type="button"
+              onClick={() => navigate('/welcome')}
+              className="group mt-5 inline-flex items-center gap-2 bg-yellow-300 text-slate-900 font-bold px-5 py-2.5 rounded-full shadow-lg hover:bg-yellow-200 transition-colors"
+            >
+              <BookOpen className="w-4 h-4" />
+              New here? Read our story first
+              <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1 motion-safe:animate-pulse" />
+            </button>
+            <p className="text-white/80 text-xs">
+              Understand the movement before you play. It takes 2 minutes.
+            </p>
           </div>
         </div>
       </section>
@@ -262,28 +343,7 @@ const Index: React.FC = () => {
       </section>
 
       {/* Footer */}
-      <footer className="bg-slate-900 text-slate-400 py-8">
-        <div className="max-w-6xl mx-auto px-4 text-center">
-          <div className="flex items-center justify-center gap-2 mb-3">
-            <Heart className="w-5 h-5 text-indigo-400 fill-indigo-400" />
-            <span className="text-white font-bold">Gr8Day Bingo</span>
-          </div>
-          <p className="text-sm mb-4">Building stronger communities through everyday acts of kindness.</p>
-          <div className="flex items-center justify-center gap-4 text-xs text-slate-500">
-            <button onClick={() => navigate('/terms')} className="hover:text-slate-300 underline underline-offset-2">
-              Terms of Service
-            </button>
-            <span>·</span>
-            <button onClick={() => navigate('/privacy')} className="hover:text-slate-300 underline underline-offset-2">
-              Privacy Policy
-            </button>
-            <span>·</span>
-            <a href="mailto:support@havagr8day.com" className="hover:text-slate-300 underline underline-offset-2">
-              Contact
-            </a>
-          </div>
-        </div>
-      </footer>
+      <Footer tone="dark" />
     </div>
   );
 };

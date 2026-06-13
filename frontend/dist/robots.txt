@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://atoms.template.com/sitemap.xml
+Sitemap: https://havagr8day.com/sitemap.xml

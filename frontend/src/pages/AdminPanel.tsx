@@ -39,6 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users } from 'lucide-react';
+import Footer from '@/components/Footer';
 
 const WIN_CONDITIONS = [
   { id: 'one_line', name: 'One Line', description: 'Complete 5 in a row (horizontal, vertical, or diagonal)' },
@@ -715,7 +716,7 @@ const AdminPanel: React.FC = () => {
   const selectedWC = WIN_CONDITIONS.find((wc) => wc.id === currentWinCondition);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Header */}
       <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-4xl mx-auto px-4 py-3 flex items-center gap-3">
@@ -1727,6 +1728,7 @@ const AdminPanel: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+      <Footer tone="light" />
     </div>
   );
 };
