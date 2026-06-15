@@ -5,8 +5,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Heart, Loader2 } from 'lucide-react';
+import { Heart, Loader2, MailWarning } from 'lucide-react';
 import { toast } from 'sonner';
+import Footer from '@/components/Footer';
 
 const HERO_BG = '#4FB3E8';
 
@@ -17,6 +18,8 @@ const Login: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [loginError, setLoginError] = useState<string | null>(null);
+  const [needVerify, setNeedVerify] = useState(false);
 
   const redirectTo = (location.state as { from?: string } | null)?.from || '/game';
 
@@ -28,12 +31,17 @@ const Login: React.FC = () => {
       return;
     }
     setSubmitting(true);
+    setLoginError(null);
+    setNeedVerify(false);
     try {
       const { first_name } = await login({ email: mail, password });
       toast.success(first_name ? `Welcome back, ${first_name}!` : 'Welcome back!');
       navigate(redirectTo, { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed.';
+      const isVerify = msg.toLowerCase().includes('verify');
+      setNeedVerify(isVerify);
+      setLoginError(msg);
       toast.error(msg);
     } finally {
       setSubmitting(false);
@@ -42,9 +50,10 @@ const Login: React.FC = () => {
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center p-4"
+      className="min-h-screen flex flex-col"
       style={{ backgroundColor: HERO_BG }}
     >
+      <div className="flex-1 flex items-center justify-center p-4">
       <Card className="w-full max-w-md shadow-2xl border-0">
         <CardHeader className="text-center space-y-2 pb-4">
           <button
@@ -61,6 +70,31 @@ const Login: React.FC = () => {
           </p>
         </CardHeader>
         <CardContent>
+          {loginError && (
+            <div
+              className={`mb-4 rounded-lg border p-3 text-sm ${
+                needVerify
+                  ? 'bg-amber-50 border-amber-200 text-amber-800'
+                  : 'bg-red-50 border-red-200 text-red-700'
+              }`}
+            >
+              <div className="flex items-start gap-2">
+                <MailWarning className="w-4 h-4 mt-0.5 shrink-0" />
+                <div>
+                  <p>{loginError}</p>
+                  {needVerify && (
+                    <button
+                      type="button"
+                      onClick={() => navigate('/resend-verification', { state: { email: email.trim() } })}
+                      className="mt-2 inline-block font-semibold underline underline-offset-2 hover:text-amber-900"
+                    >
+                      Resend verification email
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
@@ -119,6 +153,8 @@ const Login: React.FC = () => {
           </form>
         </CardContent>
       </Card>
+      </div>
+      <Footer tone="dark" />
     </div>
   );
 };

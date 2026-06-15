@@ -34,6 +34,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
 import { Heart, Wallet, ArrowLeft, Send, RefreshCw, Trophy, Users, DollarSign, Sparkles, Target, Lightbulb, Clock, CheckCircle2, XCircle, Shield, Lock, PartyPopper, Medal, LogOut, Printer } from 'lucide-react';
+import Footer from '@/components/Footer';
 import { downloadBingoCardPdf, downloadTeamCardsPdf, TeamMemberCard } from '@/lib/bingo-pdf';
 
 const HEADER_LETTERS = ['GR', '8', 'D', 'A', 'Y'];
@@ -424,6 +425,9 @@ const GameBoard: React.FC = () => {
         ...card.completed_cells,
         ...card.purchased_cells,
         ...card.referral_cells,
+        // The I DARE YA centre is a free space — it always counts (toward both
+        // the progress bar and Bingo), even though it is never "marked".
+        ...card.cells.filter((c) => c.is_free_space).map((c) => c.index),
       ]).size
     : 0;
 
@@ -444,7 +448,7 @@ const GameBoard: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-indigo-950 via-purple-950 to-slate-900 flex flex-col">
       {user && <RegistrationModal enforce />}
       {/* Header */}
       <header className="bg-black/30 backdrop-blur-md border-b border-white/10 sticky top-0 z-40">
@@ -902,6 +906,7 @@ const GameBoard: React.FC = () => {
           }}
         />
       )}
+      <Footer tone="dark" />
     </div>
   );
 };

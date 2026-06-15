@@ -9,6 +9,7 @@ import { ArrowLeft, Heart, Wallet as WalletIcon, Plus, ArrowUpRight, ArrowDownLe
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
 import { apiClient } from '@/lib/apiClient';
+import Footer from '@/components/Footer';
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLISHABLE_KEY || '');
 
@@ -139,7 +140,7 @@ const WalletPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50 flex flex-col">
       <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-40">
         <div className="max-w-2xl mx-auto px-4 py-3 flex items-center gap-3">
           <Button variant="ghost" size="icon" onClick={() => navigate('/game')}>
@@ -257,6 +258,7 @@ const WalletPage: React.FC = () => {
           </CardContent>
         </Card>
       </div>
+      <Footer tone="light" />
     </div>
   );
 };

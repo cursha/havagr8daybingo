@@ -21,6 +21,7 @@ import ResendVerification from './pages/ResendVerification';
 import PrizeHistory from './pages/PrizeHistory';
 import TradeSquares from './pages/TradeSquares';
 import Profile from './pages/Profile';
+import Welcome from './pages/Welcome';
 import NotFound from './pages/NotFound';
 
 const queryClient = new QueryClient();
@@ -46,6 +47,7 @@ const AppRoutes = () => (
     <Route path="/prize-history" element={<PrizeHistory />} />
     <Route path="/trade" element={<TradeSquares />} />
     <Route path="/profile" element={<Profile />} />
+    <Route path="/welcome" element={<Welcome />} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

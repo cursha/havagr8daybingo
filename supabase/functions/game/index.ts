@@ -1,7 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
-import { getAuthUser, requireAuth } from '../_shared/auth.ts'
+import { getAuthUser, requireAuth, requireAdmin } from '../_shared/auth.ts'
 import { getSupabase, getSubPath, matchPath } from '../_shared/db.ts'
-import { sendEmail, passwordResetEmail, referralInviteEmail, bingoWinEmail, prizeClaimConfirmationEmail } from '../_shared/email.ts'
+import { sendEmail, passwordResetEmail, referralInviteEmail, bingoWinEmail, prizeClaimConfirmationEmail, gameAnnouncementEmail } from '../_shared/email.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -129,6 +129,12 @@ function parseJsonArr(raw: string | null | undefined): number[] {
   try { return JSON.parse(raw ?? '[]') } catch { return [] }
 }
 
+/** Free-space cells (the I DARE YA centre) always count toward Bingo, even
+ *  though they are never "marked". Returns their indices from the card data. */
+function freeSpaceIndices(cells: Cell[]): number[] {
+  return cells.filter((c) => c.is_free_space).map((c) => c.index)
+}
+
 const WIN_LABELS: Record<string, string> = {
   one_line: 'One Line', two_lines: 'Two Lines', four_corners: 'Four Corners',
   x_pattern: 'X Pattern', around_the_edges: 'Around the Edges', fill_card: 'Fill the Card',
@@ -227,7 +233,7 @@ Deno.serve(async (req: Request) => {
           const completed = parseJsonArr(existing.completed_cells)
           const purchased = parseJsonArr(existing.purchased_cells)
           const referral = parseJsonArr(existing.referral_cells)
-          const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+          const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
           existing.is_bingo = checkBingo(allCompleted, existing.win_condition)
           existing.updated_at = new Date().toISOString()
           await supabase.from('player_cards').update({
@@ -307,10 +313,10 @@ Deno.serve(async (req: Request) => {
       for (let i = 0; i < 25; i++) {
         if (i === 12) {
           cells.push({
-            index: 12, deed_text: 'Refer a Player',
-            deed_text_long: 'Invite a friend to play! Submit a valid referral and this square marks itself complete.',
-            deed_id: null, is_free_space: false, is_purchasable: false, purchase_price: null,
-            is_referral_free: true, is_secret: false, secret_reward: null, quantity: 1,
+            index: 12, deed_text: 'I Dare Ya!',
+            deed_text_long: 'Tap the centre square to take the I DARE YA challenge — you might win a little, lose a little, or get dared to refer a friend. The centre is a free space and always counts toward your Bingo.',
+            deed_id: null, is_free_space: true, is_purchasable: false, purchase_price: null,
+            is_referral_free: false, is_secret: false, secret_reward: null, quantity: 1,
           })
         } else {
           const deed = selectedDeeds[deedIdx++]
@@ -421,7 +427,7 @@ Deno.serve(async (req: Request) => {
       }
 
       completed.push(cell_index)
-      const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -519,7 +525,7 @@ Deno.serve(async (req: Request) => {
       purchased.push(cell_index)
       const completed = parseJsonArr(card.completed_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...completed, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1156,7 +1162,7 @@ Deno.serve(async (req: Request) => {
       const updatedCompleted = completed.filter((i) => i !== cell_index)
       const purchased = parseJsonArr(card.purchased_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1166,6 +1172,44 @@ Deno.serve(async (req: Request) => {
       }).eq('id', card_id)
 
       return jsonResponse({ success: true, completed_cells: updatedCompleted, is_bingo: isBingo })
+    }
+
+    // ── POST /admin/announce-game ─────────────────────────────────────────────
+    if (method === 'POST' && path === '/admin/announce-game') {
+      requireAdmin(authUser)
+      const body = await req.json()
+      const { prize, game_type, theme, extra_message } = body as {
+        prize: string
+        game_type: string
+        theme: string
+        extra_message?: string
+      }
+      if (!prize || !game_type) {
+        return errorResponse('prize and game_type are required', 400)
+      }
+
+      const { data: players, error: playersErr } = await supabase
+        .from('users')
+        .select('email, first_name, name, username')
+        .eq('email_verified', true)
+        .eq('role', 'user')
+
+      if (playersErr) throw playersErr
+      if (!players || players.length === 0) {
+        return jsonResponse({ success: true, sent: 0, failed: 0, message: 'No players to notify.' })
+      }
+
+      let sent = 0
+      let failed = 0
+      for (const player of players) {
+        const displayName = player.first_name ?? player.name ?? player.username ?? null
+        const tpl = gameAnnouncementEmail({ name: displayName, prize, gameType: game_type, theme, extraMessage: extra_message })
+        const result = await sendEmail({ to: player.email, subject: tpl.subject, html: tpl.html })
+        if (result.sent) sent++
+        else failed++
+      }
+
+      return jsonResponse({ success: true, sent, failed })
     }
 
     // ── POST /admin/void-cell ─────────────────────────────────────────────────
@@ -1186,7 +1230,7 @@ Deno.serve(async (req: Request) => {
       const updatedCompleted = completed.filter((i: number) => i !== cell_index)
       const purchased = parseJsonArr(card.purchased_cells)
       const referral = parseJsonArr(card.referral_cells)
-      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
       const isBingo = checkBingo(allCompleted, card.win_condition)
 
       await supabase.from('player_cards').update({
@@ -1214,11 +1258,22 @@ Deno.serve(async (req: Request) => {
       const limit = Math.min(Math.max(1, limitParam), 500)
       const { data, error } = await supabase
         .from('cell_mark_log')
-        .select('*, users(username, email)')
+        .select('*')
         .order('created_at', { ascending: false })
         .limit(limit)
       if (error) throw error
-      return jsonResponse({ logs: data ?? [] })
+      // cell_mark_log.user_id has no FK to users, so PostgREST can't embed it.
+      // Look up the usernames/emails in a second query and attach them.
+      const logRows = data ?? []
+      const ids = [...new Set(logRows.map((l) => l.user_id).filter(Boolean))]
+      const userMap = new Map<string, { username: string | null; email: string | null }>()
+      if (ids.length > 0) {
+        const { data: us } = await supabase
+          .from('users').select('id, username, email').in('id', ids)
+        for (const u of us ?? []) userMap.set(u.id, { username: u.username ?? null, email: u.email ?? null })
+      }
+      const logs = logRows.map((l) => ({ ...l, users: userMap.get(l.user_id) ?? null }))
+      return jsonResponse({ logs })
     }
 
     // ── POST /wallet/create-payment-intent ───────────────────────────────────
@@ -1870,16 +1925,35 @@ Deno.serve(async (req: Request) => {
       }
       const currentBalance = parseFloat(wallet.balance)
 
-      // Pick outcome. Rule 1: if remove_funds would take wallet negative, re-roll
-      // to a non-remove_funds outcome (hardcoded, not configurable).
-      let chosen = pickOutcome(outcomes)
-      if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
-        const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
-        if (safePool.length > 0) {
-          chosen = pickOutcome(safePool)
-        } else {
-          // All outcomes are remove_funds (pathological config) — fall back to nothing.
-          chosen = { type: 'nothing', weight: 1, amount: 0 }
+      // ── "Refer a Player" cadence (Curt's rule, table-driven) ────────────────
+      // On the player's Nth dare spin (config dare_refer_forced_spin, default 3)
+      // the spin is GUARANTEED to land on Refer a Player ("they've played N
+      // times, clearly they enjoy it — now invite a friend"). On every other
+      // spin, Refer a Player is just one weighted outcome (~15-20%, table-driven
+      // via dare_outcome_refer_player). Set the threshold to 0 to disable forcing.
+      const { data: spinUser } = await supabase
+        .from('users').select('dare_total_spins').eq('id', user.sub).maybeSingle()
+      const priorSpins: number = spinUser?.dare_total_spins ?? 0
+      const thisSpinNumber = priorSpins + 1
+      const { data: forcedCfg } = await supabase
+        .from('game_configs').select('config_value')
+        .eq('config_key', 'dare_refer_forced_spin').maybeSingle()
+      const forcedReferSpin = parseInt(forcedCfg?.config_value ?? '3') || 0
+
+      // Pick outcome.
+      let chosen: Outcome
+      if (forcedReferSpin > 0 && thisSpinNumber === forcedReferSpin) {
+        chosen = outcomes.find((o) => o.type === 'refer_player')
+          ?? { type: 'refer_player', label: 'Refer a Player!', weight: 1, amount: 0 }
+      } else {
+        chosen = pickOutcome(outcomes)
+        // Rule 1: if remove_funds would take the wallet negative, re-roll to a
+        // non-remove_funds outcome (hardcoded, not configurable).
+        if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
+          const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
+          chosen = safePool.length > 0
+            ? pickOutcome(safePool)
+            : { type: 'nothing', label: 'No Effect', weight: 1, amount: 0 }
         }
       }
 
@@ -1966,7 +2040,7 @@ Deno.serve(async (req: Request) => {
             // Rule 2: swap_square ALWAYS un-marks the swapped cell.
             // Remove it from completed_cells so the player must complete the new deed.
             const updatedCompleted = completed.filter((i) => i !== targetCell.index)
-            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral])]
+            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
             const isBingo = checkBingo(allCompleted, card.win_condition)
 
             await supabase.from('player_cards').update({
@@ -2003,7 +2077,7 @@ Deno.serve(async (req: Request) => {
           crypto.getRandomValues(randBuf4)
           const markCell = markableCells[Math.floor((randBuf4[0] / 4_294_967_296) * markableCells.length)]
           const updatedCompleted2 = [...completed, markCell.index]
-          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral])]
+          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
           const isBingo2 = checkBingo(allCompleted2, card.win_condition)
 
           await supabase.from('player_cards').update({
@@ -2033,6 +2107,12 @@ Deno.serve(async (req: Request) => {
       await supabase.from('player_cards')
         .update({ dare_clicks: dareClicks + 1, updated_at: new Date().toISOString() })
         .eq('id', card_id)
+
+      // Increment the player's cumulative dare-spin count (drives the forced
+      // "Refer a Player" cadence above — resets never; counts across weeks).
+      await supabase.from('users')
+        .update({ dare_total_spins: thisSpinNumber })
+        .eq('id', user.sub)
 
       result.dare_clicks_used = dareClicks + 1
       result.dare_clicks_remaining = Math.max(0, maxSpins - (dareClicks + 1))
