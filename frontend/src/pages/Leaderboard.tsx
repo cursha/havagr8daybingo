@@ -7,6 +7,7 @@ import {
   LeaderboardData,
   PlayerLeaderboardData,
   PlayerRankEntry,
+  LeaderboardRegion,
   TopDeedEntry,
   GameLeaderboardEntry,
 } from '@/lib/game-utils';
@@ -116,6 +117,7 @@ const Leaderboard: React.FC = () => {
   const [gameData, setGameData] = useState<LeaderboardData | null>(null);
   const [playerData, setPlayerData] = useState<PlayerLeaderboardData | null>(null);
   const [tab, setTab] = useState<'week' | 'alltime' | 'history'>('week');
+  const [regionFilter, setRegionFilter] = useState<string>('ALL');
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -125,7 +127,9 @@ const Leaderboard: React.FC = () => {
   }, []);
 
   const topDeedsWY = gameData?.games.filter(g => g.total_deeds > 0).reduce<GameLeaderboardEntry | null>((b, g) => !b || g.total_deeds > b.total_deeds ? g : b, null)?.week_year ?? null;
-  const ranked = tab === 'week' ? (playerData?.this_week ?? []) : (playerData?.all_time ?? []);
+  const regions = tab === 'week' ? (playerData?.regions_this_week ?? []) : (playerData?.regions_all_time ?? []);
+  const allRanked = tab === 'week' ? (playerData?.this_week ?? []) : (playerData?.all_time ?? []);
+  const ranked = regionFilter === 'ALL' ? allRanked : (regions.find(r => r.code === regionFilter)?.players ?? []);
   const top3 = ranked.slice(0, 3);
   const rest = ranked.slice(3);
 
@@ -179,13 +183,34 @@ const Leaderboard: React.FC = () => {
           ].map(t => (
             <button
               key={t.key}
-              onClick={() => setTab(t.key as typeof tab)}
+              onClick={() => { setTab(t.key as typeof tab); setRegionFilter('ALL'); }}
               className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === t.key ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'}`}
             >
               {t.label}
             </button>
           ))}
         </div>
+
+        {/* Region filter — only show on player tabs */}
+        {!loading && tab !== 'history' && regions.length > 1 && (
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => setRegionFilter('ALL')}
+              className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${regionFilter === 'ALL' ? 'bg-white text-slate-900' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+            >
+              🌐 All
+            </button>
+            {regions.map(r => (
+              <button
+                key={r.code}
+                onClick={() => setRegionFilter(r.code)}
+                className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${regionFilter === r.code ? 'bg-white text-slate-900' : 'bg-white/10 text-white/70 hover:bg-white/20'}`}
+              >
+                {r.flag} {r.name} <span className="opacity-60 font-normal">({r.players.length})</span>
+              </button>
+            ))}
+          </div>
+        )}
 
         {loading ? (
           <div className="flex justify-center py-20">

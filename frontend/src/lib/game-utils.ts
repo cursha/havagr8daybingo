@@ -356,11 +356,21 @@ export interface TopDeedEntry {
   count: number;
 }
 
+export interface LeaderboardRegion {
+  code: string;
+  name: string;
+  flag: string;
+  players: PlayerRankEntry[];
+}
+
 export interface PlayerLeaderboardData {
   all_time: PlayerRankEntry[];
   this_week: PlayerRankEntry[];
+  regions_all_time: LeaderboardRegion[];
+  regions_this_week: LeaderboardRegion[];
   current_week_year: string;
   top_deeds: TopDeedEntry[];
+  promotion_threshold: number;
 }
 
 export async function getPlayerLeaderboard(): Promise<PlayerLeaderboardData> {

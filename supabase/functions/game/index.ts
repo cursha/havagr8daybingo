@@ -776,7 +776,72 @@ Deno.serve(async (req: Request) => {
         .sort((a, b) => b.count - a.count)
         .slice(0, 10)
 
-      return jsonResponse({ all_time: allTimeRanked, this_week: thisWeekRanked, current_week_year: currentWy, top_deeds: topDeeds })
+      // ── Regional grouping ──────────────────────────────────────────────────
+      const { data: thresholdCfg } = await supabase
+        .from('game_configs').select('config_value').eq('config_key', 'country_promotion_threshold').maybeSingle()
+      const promotionThreshold = parseInt(thresholdCfg?.config_value ?? '100')
+
+      // Count players per country (all-time, any deeds)
+      const playersByCountry: Record<string, number> = {}
+      for (const u of (allUsers ?? [])) {
+        const code = u.country_id ? (countryMap[u.country_id]?.code ?? null) : null
+        if (!code) continue
+        playersByCountry[code] = (playersByCountry[code] ?? 0) + 1
+      }
+
+      // Determine promoted countries (>= threshold, not CA or US)
+      const ALWAYS_SHOWN = new Set(['CA', 'US'])
+      const promotedCodes = new Set(
+        Object.entries(playersByCountry)
+          .filter(([code, count]) => !ALWAYS_SHOWN.has(code) && count >= promotionThreshold)
+          .map(([code]) => code)
+      )
+
+      const regionOrder = ['CA', 'US', ...Array.from(promotedCodes).sort(), 'ROW']
+
+      const getRegionCode = (countryCode: string | null): string => {
+        if (!countryCode) return 'ROW'
+        if (countryCode === 'CA' || countryCode === 'US') return countryCode
+        if (promotedCodes.has(countryCode)) return countryCode
+        return 'ROW'
+      }
+
+      const regionLabel = (code: string) => {
+        if (code === 'ROW') return 'Rest of World'
+        return countryMap[Object.keys(countryMap).find(id => countryMap[Number(id)]?.code === code) as any]?.name ?? code
+      }
+
+      // Group all-time and this-week into regions
+      const buildRegions = (ranked: ReturnType<typeof makeEntry>[]) => {
+        const buckets: Record<string, ReturnType<typeof makeEntry>[]> = {}
+        for (const code of regionOrder) buckets[code] = []
+        for (const entry of ranked) {
+          const rc = getRegionCode(entry.country_code)
+          if (!buckets[rc]) buckets[rc] = []
+          buckets[rc].push(entry)
+        }
+        return regionOrder
+          .filter(code => buckets[code]?.length > 0)
+          .map(code => ({
+            code,
+            name: regionLabel(code),
+            flag: code === 'CA' ? '🍁' : code === 'US' ? '🇺🇸' : code === 'ROW' ? '🌍' : '',
+            players: buckets[code],
+          }))
+      }
+
+      const regionsAllTime = buildRegions(allTimeRanked)
+      const regionsThisWeek = buildRegions(thisWeekRanked)
+
+      return jsonResponse({
+        all_time: allTimeRanked,
+        this_week: thisWeekRanked,
+        regions_all_time: regionsAllTime,
+        regions_this_week: regionsThisWeek,
+        current_week_year: currentWy,
+        top_deeds: topDeeds,
+        promotion_threshold: promotionThreshold,
+      })
     }
 
     // ── GET /public/countries ─────────────────────────────────────────────────
