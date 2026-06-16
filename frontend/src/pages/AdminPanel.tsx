@@ -39,6 +39,9 @@ import {
   adminDeleteTeam,
   adminAddTeamMember,
   adminRemoveTeamMember,
+  DeedCategory,
+  getAdminDeedCategories,
+  updateAdminDeedCategory,
 } from '@/lib/game-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -123,6 +126,9 @@ const AdminPanel: React.FC = () => {
   const [announceTheme, setAnnounceTheme] = useState('');
   const [announceExtra, setAnnounceExtra] = useState('');
 
+  // Deed categories state
+  const [deedCategories, setDeedCategories] = useState<DeedCategory[]>([]);
+
   // Teams state
   const [teams, setTeams] = useState<TeamItem[]>([]);
   const [newTeamName, setNewTeamName] = useState('');
@@ -166,6 +172,12 @@ const AdminPanel: React.FC = () => {
       }
       setEditConfigs(initial);
       setDeeds(deedsData.deeds || []);
+
+      // Load deed categories
+      try {
+        const catRes = await getAdminDeedCategories();
+        setDeedCategories(catRes.categories || []);
+      } catch { /* silent */ }
     } catch (err: any) {
       toast.error('Failed to load admin data');
     }
@@ -1463,6 +1475,50 @@ const AdminPanel: React.FC = () => {
             <Button onClick={handleSaveConfig} className="bg-indigo-600 hover:bg-indigo-700 text-white">
               <Save className="w-4 h-4 mr-1" /> Save Configuration
             </Button>
+          </CardContent>
+        </Card>
+
+        {/* Deed Categories */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-emerald-500" />
+              Deed Categories
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-slate-500 mb-3">
+              Turn categories on or off to control which deed types appear on new cards next week. Cards already in play are not affected.
+            </p>
+            <div className="space-y-2">
+              {deedCategories.map(cat => (
+                <div key={cat.name} className="flex items-center justify-between p-3 border rounded-lg bg-slate-50">
+                  <div>
+                    <span className="font-black text-sm tracking-widest text-slate-800">{cat.name}</span>
+                    <p className="text-xs text-slate-500 mt-0.5">{cat.description}</p>
+                  </div>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <span className="text-xs text-slate-500">{cat.is_active ? 'Active' : 'Off'}</span>
+                    <input
+                      type="checkbox"
+                      checked={cat.is_active}
+                      onChange={async (e) => {
+                        const newVal = e.target.checked;
+                        setDeedCategories(prev => prev.map(c => c.name === cat.name ? { ...c, is_active: newVal } : c));
+                        try {
+                          await updateAdminDeedCategory(cat.name, { is_active: newVal });
+                          toast.success(`${cat.name} ${newVal ? 'activated' : 'deactivated'}`);
+                        } catch {
+                          toast.error('Failed to update category');
+                          setDeedCategories(prev => prev.map(c => c.name === cat.name ? { ...c, is_active: !newVal } : c));
+                        }
+                      }}
+                      className="w-4 h-4 accent-emerald-500"
+                    />
+                  </label>
+                </div>
+              ))}
+            </div>
           </CardContent>
         </Card>
 

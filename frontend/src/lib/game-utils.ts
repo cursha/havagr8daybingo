@@ -418,6 +418,21 @@ export async function getAdminConfig() {
   return withRetry(() => apiClient.get<Record<string, string>>('/game/admin/config'));
 }
 
+export interface DeedCategory {
+  id: number;
+  name: string;
+  description: string;
+  is_active: boolean;
+}
+
+export async function getAdminDeedCategories(): Promise<{ categories: DeedCategory[] }> {
+  return apiClient.get('/game/admin/deed-categories');
+}
+
+export async function updateAdminDeedCategory(name: string, updates: { is_active?: boolean; description?: string }): Promise<void> {
+  await apiClient.put(`/game/admin/deed-categories/${name}`, updates);
+}
+
 export async function updateAdminConfig(configs: Record<string, string>) {
   return apiClient.post<{ success: boolean }>('/game/admin/config', { configs });
 }

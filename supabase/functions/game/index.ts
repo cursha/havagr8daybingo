@@ -278,11 +278,18 @@ Deno.serve(async (req: Request) => {
         })
       }
 
-      // Build a new card
-      const { data: deeds } = await supabase
-        .from('good_deeds').select('*').eq('is_active', true)
+      // Build a new card — only use deeds from active categories
+      const { data: activeCategories } = await supabase
+        .from('deed_categories').select('name').eq('is_active', true)
+      const activeCategoryNames = (activeCategories ?? []).map(c => c.name)
+
+      let deedQuery = supabase.from('good_deeds').select('*').eq('is_active', true)
+      if (activeCategoryNames.length > 0) {
+        deedQuery = deedQuery.in('category', activeCategoryNames)
+      }
+      const { data: deeds } = await deedQuery
       if (!deeds || deeds.length < 24) {
-        return errorResponse('Not enough active deeds to generate a card', 400)
+        return errorResponse('Not enough active deeds in the selected categories to generate a card', 400)
       }
 
       const { data: cfgRows } = await supabase.from('game_configs').select('config_key, config_value')
@@ -736,6 +743,26 @@ Deno.serve(async (req: Request) => {
         counts[id].count++
       }
       return jsonResponse({ stats: Object.values(counts) })
+    }
+
+    // ── Admin: GET /admin/deed-categories ────────────────────────────────────
+    if (method === 'GET' && path === '/admin/deed-categories') {
+      requireAdmin(authUser)
+      const { data } = await supabase.from('deed_categories').select('*').order('name')
+      return jsonResponse({ categories: data ?? [] })
+    }
+
+    // ── Admin: PUT /admin/deed-categories/:name ───────────────────────────────
+    const catEditMatch = path.match(/^\/admin\/deed-categories\/([A-Z]+)$/)
+    if (method === 'PUT' && catEditMatch) {
+      requireAdmin(authUser)
+      const name = catEditMatch[1]
+      const body = await req.json()
+      const updates: Record<string, unknown> = {}
+      if (body.is_active !== undefined) updates.is_active = body.is_active
+      if (body.description !== undefined) updates.description = body.description
+      await supabase.from('deed_categories').update(updates).eq('name', name)
+      return jsonResponse({ success: true })
     }
 
     // ── Admin: GET /admin/quick-deeds ────────────────────────────────────────
