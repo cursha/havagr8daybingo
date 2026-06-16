@@ -525,7 +525,7 @@ const GameBoard: React.FC = () => {
               <Printer className="w-3.5 h-3.5 mr-0.5" />
               <span className="hidden sm:inline">Print Card</span>
             </Button>
-            {myTeam && (
+            {myTeam && playerBadge?.is_captain && (
               <Button
                 size="sm"
                 variant="outline"
