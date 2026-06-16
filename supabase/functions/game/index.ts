@@ -833,6 +833,40 @@ Deno.serve(async (req: Request) => {
       const regionsAllTime = buildRegions(allTimeRanked)
       const regionsThisWeek = buildRegions(thisWeekRanked)
 
+      // ── Weekly trend (this week vs last week) ────────────────────────────────
+      const lastWy = (() => {
+        const [yr, wk] = currentWy.split('-W').map(Number)
+        if (wk === 1) return `${yr - 1}-W52`
+        return `${yr}-W${String(wk - 1).padStart(2, '0')}`
+      })()
+
+      let thisWeekDeeds = 0
+      let lastWeekDeeds = 0
+      for (const card of (allCards ?? [])) {
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const ps = new Set(purchased); const rs = new Set(referral)
+        const count = completed.filter(idx => !ps.has(idx) && !rs.has(idx) && idx !== 12).length
+        if (card.week_year === currentWy) thisWeekDeeds += count
+        if (card.week_year === lastWy) lastWeekDeeds += count
+      }
+      const weekTrend = thisWeekDeeds - lastWeekDeeds
+
+      // ── Country count (breadth) ───────────────────────────────────────────────
+      const uniqueCountries = new Set(
+        (allUsers ?? []).filter(u => u.country_id).map(u => u.country_id)
+      ).size
+
+      // ── Country flag cluster (top countries by player count) ─────────────────
+      const topCountryFlags = Object.entries(playersByCountry)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8)
+        .map(([code]) => {
+          const flagMap: Record<string, string> = { CA:'🍁',US:'🇺🇸',GB:'🇬🇧',AU:'🇦🇺',NZ:'🇳🇿',IE:'🇮🇪',IN:'🇮🇳',NG:'🇳🇬',ZA:'🇿🇦',PH:'🇵🇭',MX:'🇲🇽',BR:'🇧🇷',FR:'🇫🇷',DE:'🇩🇪',JP:'🇯🇵' }
+          return flagMap[code] ?? '🌐'
+        })
+
       return jsonResponse({
         all_time: allTimeRanked,
         this_week: thisWeekRanked,
@@ -841,6 +875,11 @@ Deno.serve(async (req: Request) => {
         current_week_year: currentWy,
         top_deeds: topDeeds,
         promotion_threshold: promotionThreshold,
+        this_week_deeds: thisWeekDeeds,
+        last_week_deeds: lastWeekDeeds,
+        week_trend: weekTrend,
+        unique_countries: uniqueCountries,
+        top_country_flags: topCountryFlags,
       })
     }
 

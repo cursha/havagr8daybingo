@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Heart, Home, Gamepad2, Trophy, Flame, Calendar, Sparkles } from 'lucide-react';
+import { Heart, Home, Gamepad2, Trophy, Flame, Calendar, Sparkles, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import {
   getLeaderboard,
   getPlayerLeaderboard,
@@ -155,20 +155,52 @@ const Leaderboard: React.FC = () => {
 
       <main className="max-w-2xl mx-auto w-full px-4 py-8 flex-1 space-y-8">
         {/* Hero stat */}
-        <div className="text-center space-y-3">
+        <div className="text-center space-y-4">
           <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/30 mb-2">
             <Trophy className="w-11 h-11 text-white" />
           </div>
           <h1 className="text-5xl md:text-6xl font-black text-white tracking-tight">Leaderboard</h1>
+
+          {/* All-time mega number */}
           {gameData && (
             <div className="space-y-1">
               <p className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-emerald-300">
                 {gameData.grand_total_deeds.toLocaleString()}
               </p>
-              <p className="text-white/60 text-lg font-medium">Gr8Day Deeds done by this community</p>
-              <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full mt-2">
-                <Sparkles className="w-4 h-4 text-amber-300" />
-                <span className="text-white/80 text-sm">{gameData.total_games} games · {playerData?.all_time.length ?? 0} players</span>
+              <p className="text-white/60 text-lg font-medium">acts of kindness done by this community</p>
+            </div>
+          )}
+
+          {/* Impact stats row */}
+          {playerData && (
+            <div className="grid grid-cols-3 gap-3 mt-2">
+              {/* This week's deeds + trend */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-3 text-center">
+                <p className="text-2xl font-black text-emerald-300">{playerData.this_week_deeds}</p>
+                <p className="text-white/50 text-xs mt-0.5">This week</p>
+                <div className={`flex items-center justify-center gap-0.5 mt-1 text-xs font-bold ${playerData.week_trend > 0 ? 'text-emerald-400' : playerData.week_trend < 0 ? 'text-red-400' : 'text-white/30'}`}>
+                  {playerData.week_trend > 0 ? <TrendingUp className="w-3 h-3" /> : playerData.week_trend < 0 ? <TrendingDown className="w-3 h-3" /> : <Minus className="w-3 h-3" />}
+                  {playerData.week_trend > 0 ? `+${playerData.week_trend}` : playerData.week_trend < 0 ? playerData.week_trend : '—'} vs last week
+                </div>
+              </div>
+              {/* Players */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-3 text-center">
+                <p className="text-2xl font-black text-indigo-300">{playerData.all_time.length + (playerData.all_time.length === 0 ? 0 : 0)}</p>
+                <p className="text-white/50 text-xs mt-0.5">Players</p>
+                <div className="flex items-center justify-center gap-1 mt-1">
+                  <Sparkles className="w-3 h-3 text-amber-300" />
+                  <span className="text-white/40 text-xs">{gameData?.total_games ?? 0} games</span>
+                </div>
+              </div>
+              {/* Countries */}
+              <div className="bg-white/5 border border-white/10 rounded-2xl p-3 text-center">
+                <p className="text-2xl font-black text-yellow-300">{playerData.unique_countries || '—'}</p>
+                <p className="text-white/50 text-xs mt-0.5">Countries</p>
+                <div className="flex items-center justify-center gap-0.5 mt-1 flex-wrap">
+                  {(playerData.top_country_flags ?? []).slice(0, 5).map((f, i) => (
+                    <span key={i} className="text-sm leading-none">{f}</span>
+                  ))}
+                </div>
               </div>
             </div>
           )}

@@ -371,6 +371,11 @@ export interface PlayerLeaderboardData {
   current_week_year: string;
   top_deeds: TopDeedEntry[];
   promotion_threshold: number;
+  this_week_deeds: number;
+  last_week_deeds: number;
+  week_trend: number;
+  unique_countries: number;
+  top_country_flags: string[];
 }
 
 export async function getPlayerLeaderboard(): Promise<PlayerLeaderboardData> {
