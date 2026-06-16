@@ -653,7 +653,7 @@ const AdminPanel: React.FC = () => {
     if (memberStateFilter !== 'all') filterParts.push(memberStateFilter);
     if (memberChallengeFilter === 'none') filterParts.push('No challenge level set');
     else if (memberChallengeFilter !== 'all') filterParts.push(`Challenge level ${memberChallengeFilter}`);
-    const filterDesc = filterParts.length > 0 ? filterParts.join(' · ') : 'All members';
+    const filterDesc = filterParts.length > 0 ? filterParts.join(' · ') : 'All players';
     const rows = list.map((m) => `
       <tr>
         <td>${esc(m.name) || '—'}</td>
@@ -680,8 +680,8 @@ const AdminPanel: React.FC = () => {
   @media print{body{padding:0}@page{margin:15mm}}
 </style></head>
 <body>
-  <h1>Gr8Day Members</h1>
-  <p class="meta">${list.length} member${list.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${filterDesc} &nbsp;·&nbsp; ${new Date().toLocaleDateString()}</p>
+  <h1>Gr8Day Players</h1>
+  <p class="meta">${list.length} player${list.length !== 1 ? 's' : ''} &nbsp;·&nbsp; ${filterDesc} &nbsp;·&nbsp; ${new Date().toLocaleDateString()}</p>
   <table>
     <thead><tr><th>#</th><th>Name</th><th>Email</th><th>City</th><th>Province / State</th><th>Country</th><th>Challenge</th><th>Last Active</th></tr></thead>
     <tbody>${rows}</tbody>
@@ -893,7 +893,7 @@ const AdminPanel: React.FC = () => {
             <CardTitle className="flex items-center justify-between flex-wrap gap-2">
               <span className="flex items-center gap-2">
                 <Users className="w-5 h-5 text-sky-500" />
-                Members ({members.length})
+                Players ({members.length})
               </span>
               <div className="flex flex-wrap items-center gap-2">
                 <Select value={memberCountryFilter} onValueChange={(v) => { setMemberCountryFilter(v); setMemberStateFilter('all'); }}>
@@ -947,7 +947,7 @@ const AdminPanel: React.FC = () => {
             {members.length === 0 ? (
               <div className="text-center py-8 text-slate-400 text-sm flex flex-col items-center gap-2">
                 <Users className="w-8 h-8 text-slate-300" />
-                No members yet.
+                No players yet.
               </div>
             ) : (
               <div className="border rounded-lg overflow-hidden">
