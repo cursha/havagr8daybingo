@@ -18,6 +18,7 @@ interface Cell {
   secret_reward: number | null
   secret_revealed?: boolean
   quantity: number
+  category: string | null
 }
 
 // ── Security: strip secret fields before sending cells to client ─────────────
@@ -214,9 +215,13 @@ Deno.serve(async (req: Request) => {
         const deedIds = cells.map((c) => c.deed_id).filter((id): id is number => id != null)
         if (deedIds.length > 0) {
           const { data: freshDeeds } = await supabase
-            .from('good_deeds').select('id, quantity').in('id', deedIds)
+            .from('good_deeds').select('id, quantity, category').in('id', deedIds)
           const qtyById = new Map<number, number>()
-          for (const d of freshDeeds ?? []) qtyById.set(d.id, d.quantity ?? 1)
+          const catById = new Map<number, string | null>()
+          for (const d of freshDeeds ?? []) {
+            qtyById.set(d.id, d.quantity ?? 1)
+            catById.set(d.id, d.category ?? null)
+          }
           for (const c of cells) {
             if (c.deed_id != null && qtyById.has(c.deed_id)) {
               const freshQty = qtyById.get(c.deed_id)!
@@ -224,6 +229,7 @@ Deno.serve(async (req: Request) => {
                 c.quantity = freshQty
                 needsSave = true
               }
+              c.category = catById.get(c.deed_id) ?? null
             }
           }
         }

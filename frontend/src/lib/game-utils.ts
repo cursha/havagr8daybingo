@@ -48,6 +48,7 @@ export interface CellData {
   secret_reward?: number | null;
   secret_revealed?: boolean;
   quantity?: number;
+  category?: string | null;
 }
 
 export interface MarkCellResult {
