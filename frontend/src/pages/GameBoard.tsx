@@ -29,6 +29,7 @@ import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
 import RegistrationModal from '@/components/RegistrationModal';
 import DareModal from '@/components/DareModal';
+import EditProfileModal from '@/components/EditProfileModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -84,6 +85,7 @@ const GameBoard: React.FC = () => {
   const [dareResult, setDareResult] = useState<DareSpinResult | null>(null);
   const [dareSpinning, setDareSpinning] = useState(false);
   const [pendingTradeCount, setPendingTradeCount] = useState(0);
+  const [showEditProfile, setShowEditProfile] = useState(false);
 
   useEffect(() => {
     getPublicPrize()
@@ -463,8 +465,9 @@ const GameBoard: React.FC = () => {
             </div>
             {playerNumber && (
               <button
-                onClick={() => navigate('/profile')}
+                onClick={() => setShowEditProfile(true)}
                 className="hidden sm:flex items-center gap-1 hover:opacity-80 transition-opacity"
+                title="Edit profile"
               >
                 {playerBadge && (
                   <img
@@ -904,6 +907,12 @@ const GameBoard: React.FC = () => {
             // Scroll to referral section
             document.getElementById('referral-section')?.scrollIntoView({ behavior: 'smooth' });
           }}
+        />
+      )}
+      {showEditProfile && (
+        <EditProfileModal
+          onClose={() => setShowEditProfile(false)}
+          onDeleted={() => { logout(); navigate('/'); }}
         />
       )}
       <Footer tone="dark" />

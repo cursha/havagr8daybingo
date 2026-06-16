@@ -527,6 +527,51 @@ export async function getRegistrationStatus(): Promise<ProfileStatus> {
   return withRetry(() => apiClient.get<ProfileStatus>('/registration/status'));
 }
 
+// ── Profile editing ───────────────────────────────────────────────────────────
+
+export interface ProfileDetails {
+  first_name: string | null;
+  last_name: string | null;
+  username: string | null;
+  email: string;
+  city: string | null;
+  country_id: number | null;
+  state_id: number | null;
+  challenge_level: number | null;
+  player_number: number | null;
+}
+
+export async function getMyProfileDetails(): Promise<ProfileDetails> {
+  return apiClient.get<ProfileDetails>('/game/my-profile/details');
+}
+
+export async function updateMyProfile(data: Partial<Omit<ProfileDetails, 'email' | 'player_number'>>): Promise<void> {
+  await apiClient.put('/game/my-profile', data);
+}
+
+export async function changePassword(current_password: string, new_password: string): Promise<void> {
+  await apiClient.post('/auth-custom/change-password', { current_password, new_password });
+}
+
+export async function deleteMyAccount(): Promise<void> {
+  await apiClient.delete('/game/my-profile');
+}
+
+export async function adminCreatePlayer(data: {
+  first_name?: string; last_name?: string; email: string;
+  username?: string; password: string; role?: string; admin_password: string;
+}): Promise<{ user_id: string }> {
+  return apiClient.post<{ user_id: string }>('/game/admin/players', data);
+}
+
+export async function adminUpdatePlayer(id: string, data: Record<string, unknown> & { admin_password: string }): Promise<void> {
+  await apiClient.put(`/game/admin/players/${id}`, data);
+}
+
+export async function adminDeletePlayer(id: string, admin_password: string): Promise<void> {
+  await apiClient.delete(`/game/admin/players/${id}?admin_password=${encodeURIComponent(admin_password)}`);
+}
+
 export async function registerProfile(payload: {
   first_name: string;
   last_name: string;

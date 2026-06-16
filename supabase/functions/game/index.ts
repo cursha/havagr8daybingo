@@ -2201,6 +2201,150 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ players })
     }
 
+    // ── GET /my-profile/details ───────────────────────────────────────────────
+    if (method === 'GET' && path === '/my-profile/details') {
+      const user = requireAuth(authUser)
+      const { data: u } = await supabase
+        .from('users')
+        .select('first_name, last_name, username, email, city, country_id, state_id, challenge_level, player_number')
+        .eq('id', user.sub)
+        .maybeSingle()
+      if (!u) return errorResponse('User not found', 404)
+      return jsonResponse(u)
+    }
+
+    // ── PUT /my-profile ───────────────────────────────────────────────────────
+    if (method === 'PUT' && path === '/my-profile') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { first_name, last_name, username, city, country_id, state_id, challenge_level } = body
+
+      if (username) {
+        const { data: existing } = await supabase
+          .from('users').select('id').eq('username', username).neq('id', user.sub).maybeSingle()
+        if (existing) return errorResponse('Username is already taken', 409)
+      }
+      if (challenge_level != null && (challenge_level < 1 || challenge_level > 5)) {
+        return errorResponse('challenge_level must be between 1 and 5', 400)
+      }
+
+      await supabase.from('users').update({
+        ...(first_name !== undefined && { first_name }),
+        ...(last_name !== undefined && { last_name }),
+        ...(username !== undefined && { username }),
+        ...(city !== undefined && { city }),
+        ...(country_id !== undefined && { country_id }),
+        ...(state_id !== undefined && { state_id }),
+        ...(challenge_level !== undefined && { challenge_level }),
+      }).eq('id', user.sub)
+
+      return jsonResponse({ success: true })
+    }
+
+    // ── DELETE /my-profile ────────────────────────────────────────────────────
+    if (method === 'DELETE' && path === '/my-profile') {
+      const user = requireAuth(authUser)
+      await supabase.from('square_trades').delete().eq('from_user_id', user.sub)
+      await supabase.from('square_trades').delete().eq('to_user_id', user.sub)
+      await supabase.from('team_members').delete().eq('user_id', user.sub)
+      await supabase.from('pending_deeds').delete().eq('user_id', user.sub)
+      await supabase.from('player_cards').delete().eq('user_id', user.sub)
+      await supabase.from('wallet_transactions').delete().eq('user_id', user.sub)
+      await supabase.from('player_wallets').delete().eq('user_id', user.sub)
+      await supabase.from('users').delete().eq('id', user.sub)
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /admin/players ───────────────────────────────────────────────────
+    if (method === 'POST' && path === '/admin/players') {
+      const body = await req.json()
+      const { data: cfg } = await supabase
+        .from('game_configs').select('config_value').eq('config_key', 'admin_password').maybeSingle()
+      if (!cfg || cfg.config_value !== body.admin_password) return errorResponse('Invalid admin password', 403)
+
+      const email = String(body.email ?? '').trim().toLowerCase()
+      const username = String(body.username ?? '').trim()
+      const password = String(body.password ?? '')
+      if (!email || !password) return errorResponse('email and password are required', 400)
+
+      const { data: emailExists } = await supabase.from('users').select('id').eq('email', email).maybeSingle()
+      if (emailExists) return errorResponse('Email already in use', 409)
+      if (username) {
+        const { data: uExists } = await supabase.from('users').select('id').eq('username', username).maybeSingle()
+        if (uExists) return errorResponse('Username already taken', 409)
+      }
+
+      const passwordHash = await bcrypt.hash(password, 10)
+      const userId = crypto.randomUUID()
+      const { error } = await supabase.from('users').insert({
+        id: userId,
+        email,
+        username: username || null,
+        password_hash: passwordHash,
+        first_name: body.first_name ?? null,
+        last_name: body.last_name ?? null,
+        role: body.role ?? 'user',
+        email_verified: true,
+      })
+      if (error) throw error
+      return jsonResponse({ success: true, user_id: userId })
+    }
+
+    // ── PUT /admin/players/:id ────────────────────────────────────────────────
+    const adminPlayerPutMatch = method === 'PUT' && path.match(/^\/admin\/players\/([^/]+)$/)
+    if (adminPlayerPutMatch) {
+      const targetId = adminPlayerPutMatch[1]
+      const body = await req.json()
+      const { data: cfg } = await supabase
+        .from('game_configs').select('config_value').eq('config_key', 'admin_password').maybeSingle()
+      if (!cfg || cfg.config_value !== body.admin_password) return errorResponse('Invalid admin password', 403)
+
+      const { first_name, last_name, email, username, city, country_id, state_id, challenge_level, role } = body
+
+      if (email) {
+        const { data: existing } = await supabase.from('users').select('id').eq('email', email).neq('id', targetId).maybeSingle()
+        if (existing) return errorResponse('Email already in use', 409)
+      }
+      if (username) {
+        const { data: existing } = await supabase.from('users').select('id').eq('username', username).neq('id', targetId).maybeSingle()
+        if (existing) return errorResponse('Username already taken', 409)
+      }
+
+      await supabase.from('users').update({
+        ...(first_name !== undefined && { first_name }),
+        ...(last_name !== undefined && { last_name }),
+        ...(email !== undefined && { email }),
+        ...(username !== undefined && { username }),
+        ...(city !== undefined && { city }),
+        ...(country_id !== undefined && { country_id }),
+        ...(state_id !== undefined && { state_id }),
+        ...(challenge_level !== undefined && { challenge_level }),
+        ...(role !== undefined && { role }),
+      }).eq('id', targetId)
+
+      return jsonResponse({ success: true })
+    }
+
+    // ── DELETE /admin/players/:id ─────────────────────────────────────────────
+    const adminPlayerDeleteMatch = method === 'DELETE' && path.match(/^\/admin\/players\/([^/]+)$/)
+    if (adminPlayerDeleteMatch) {
+      const targetId = adminPlayerDeleteMatch[1]
+      const adminPw = new URL(req.url).searchParams.get('admin_password')
+      const { data: cfg } = await supabase
+        .from('game_configs').select('config_value').eq('config_key', 'admin_password').maybeSingle()
+      if (!cfg || cfg.config_value !== adminPw) return errorResponse('Invalid admin password', 403)
+
+      await supabase.from('square_trades').delete().eq('from_user_id', targetId)
+      await supabase.from('square_trades').delete().eq('to_user_id', targetId)
+      await supabase.from('team_members').delete().eq('user_id', targetId)
+      await supabase.from('pending_deeds').delete().eq('user_id', targetId)
+      await supabase.from('player_cards').delete().eq('user_id', targetId)
+      await supabase.from('wallet_transactions').delete().eq('user_id', targetId)
+      await supabase.from('player_wallets').delete().eq('user_id', targetId)
+      await supabase.from('users').delete().eq('id', targetId)
+      return jsonResponse({ success: true })
+    }
+
     return errorResponse('Not found', 404)
   } catch (err: unknown) {
     if (err && typeof err === 'object' && 'status' in err) {
