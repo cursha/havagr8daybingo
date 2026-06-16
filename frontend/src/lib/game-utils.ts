@@ -337,6 +337,28 @@ export async function getLeaderboard(): Promise<LeaderboardData> {
   return withRetry(() => apiClient.get<LeaderboardData>('/game/leaderboard'));
 }
 
+export interface PlayerRankEntry {
+  user_id: string;
+  display_name: string;
+  player_number: number | null;
+  city: string | null;
+  country_name: string | null;
+  country_code: string | null;
+  deeds: number;
+  badge_name: string;
+  badge_emoji: string;
+}
+
+export interface PlayerLeaderboardData {
+  all_time: PlayerRankEntry[];
+  this_week: PlayerRankEntry[];
+  current_week_year: string;
+}
+
+export async function getPlayerLeaderboard(): Promise<PlayerLeaderboardData> {
+  return withRetry(() => apiClient.get<PlayerLeaderboardData>('/game/leaderboard/players', { skipAuth: true } as any));
+}
+
 export async function getPublicPrize(): Promise<PrizeInfo> {
   return apiClient.get<PrizeInfo>('/game/public/prize', { skipAuth: true });
 }

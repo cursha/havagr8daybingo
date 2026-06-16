@@ -1,289 +1,250 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import {
-  Trophy,
-  Home,
-  Gamepad2,
-  Heart,
-  Loader2,
-  Calendar,
-  Sparkles,
-  Flame,
-} from 'lucide-react';
+import { Heart, Home, Gamepad2, Trophy, Flame, Calendar, Sparkles } from 'lucide-react';
 import {
   getLeaderboard,
+  getPlayerLeaderboard,
   LeaderboardData,
+  PlayerLeaderboardData,
+  PlayerRankEntry,
   GameLeaderboardEntry,
 } from '@/lib/game-utils';
-import { toast } from 'sonner';
 import Footer from '@/components/Footer';
 
-/**
- * Convert an ISO week-year string like "2026-W17" into a human-friendly label
- * showing the Monday of that week (e.g. "Week of Apr 20, 2026").
- */
+const BADGE_IMAGES: Record<string, string> = {
+  Starter:  '/badge-starter.png',
+  Builder:  '/badge-builder.png',
+  Champion: '/badge-champion.png',
+  Hero:     '/badge-hero.png',
+  Legend:   '/badge-legend.png',
+  Expert:   '/badge-expert.png',
+};
+
+const COUNTRY_FLAG: Record<string, string> = {
+  CA: '🇨🇦', US: '🇺🇸', GB: '🇬🇧', AU: '🇦🇺', NZ: '🇳🇿',
+  IE: '🇮🇪', IN: '🇮🇳', NG: '🇳🇬', ZA: '🇿🇦', PH: '🇵🇭',
+  MX: '🇲🇽', BR: '🇧🇷', FR: '🇫🇷', DE: '🇩🇪', JP: '🇯🇵',
+};
+
 function weekYearToLabel(weekYear: string): string {
   const match = /^(\d{4})-W(\d{1,2})$/.exec(weekYear);
   if (!match) return weekYear;
   const year = parseInt(match[1], 10);
   const week = parseInt(match[2], 10);
-
-  // ISO week 1 = week containing the first Thursday. Compute Monday of week N.
   const jan4 = new Date(Date.UTC(year, 0, 4));
-  const jan4Day = jan4.getUTCDay() || 7; // 1 = Monday ... 7 = Sunday
+  const jan4Day = jan4.getUTCDay() || 7;
   const mondayOfWeek1 = new Date(jan4);
   mondayOfWeek1.setUTCDate(jan4.getUTCDate() - (jan4Day - 1));
   const targetMonday = new Date(mondayOfWeek1);
   targetMonday.setUTCDate(mondayOfWeek1.getUTCDate() + (week - 1) * 7);
-
-  return `Week of ${targetMonday.toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-    timeZone: 'UTC',
-  })}`;
+  return targetMonday.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
-const GameRow: React.FC<{ entry: GameLeaderboardEntry; isTopDeeds: boolean }> = ({
-  entry,
-  isTopDeeds,
-}) => {
+const PODIUM_STYLES = [
+  { order: 2, height: 'h-28', bg: 'from-yellow-400 to-amber-500', ring: 'ring-yellow-300', label: '1st', crown: '👑', textSize: 'text-2xl' },
+  { order: 1, height: 'h-20', bg: 'from-slate-300 to-slate-400', ring: 'ring-slate-300', label: '2nd', crown: '🥈', textSize: 'text-lg' },
+  { order: 3, height: 'h-16', bg: 'from-amber-600 to-orange-700', ring: 'ring-amber-400', label: '3rd', crown: '🥉', textSize: 'text-base' },
+];
+
+const BadgeImg: React.FC<{ name: string; emoji: string; size?: string }> = ({ name, emoji, size = 'w-8 h-8' }) =>
+  BADGE_IMAGES[name]
+    ? <img src={BADGE_IMAGES[name]} alt={name} className={`${size} rounded-full object-cover`} />
+    : <span className="text-xl leading-none">{emoji}</span>;
+
+const PodiumCard: React.FC<{ entry: PlayerRankEntry; rank: 1 | 2 | 3 }> = ({ entry, rank }) => {
+  const s = PODIUM_STYLES[rank - 1];
   return (
-    <div
-      className={`flex items-center gap-3 sm:gap-4 p-3 sm:p-4 rounded-xl transition-all ${
-        entry.is_current
-          ? 'bg-gradient-to-r from-indigo-50 via-white to-purple-50 border-2 border-indigo-300 shadow-sm'
-          : isTopDeeds
-            ? 'bg-gradient-to-r from-amber-50 via-white to-orange-50 border border-amber-200'
-            : 'bg-white border border-slate-100 hover:bg-slate-50'
-      }`}
-    >
-      {/* Game number badge */}
-      <div className="flex-shrink-0 w-10 h-10 sm:w-12 sm:h-12 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex flex-col items-center justify-center text-white shadow-md">
-        <span className="text-[9px] uppercase font-bold tracking-wider opacity-80 leading-none">
-          Game
-        </span>
-        <span className="text-base font-black leading-none mt-0.5">
-          #{entry.game_number}
-        </span>
+    <div className={`flex flex-col items-center gap-1 order-${s.order}`} style={{ order: s.order }}>
+      <span className="text-2xl mb-1">{s.crown}</span>
+      <BadgeImg name={entry.badge_name} emoji={entry.badge_emoji} size="w-12 h-12" />
+      <p className={`font-black text-white ${s.textSize} text-center leading-tight max-w-[90px] truncate`}>{entry.display_name}</p>
+      <p className="text-white/70 text-xs font-mono">GR8-{entry.player_number}</p>
+      <div className="flex items-center gap-1">
+        <Heart className="w-3.5 h-3.5 text-rose-300 fill-rose-300" />
+        <span className="text-white font-black text-lg">{entry.deeds}</span>
       </div>
-
-      {/* Week label + badges */}
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-semibold text-slate-800 truncate flex items-center gap-1.5">
-            <Calendar className="w-3.5 h-3.5 text-slate-400" />
-            {weekYearToLabel(entry.week_year)}
-          </p>
-          {entry.is_current && (
-            <Badge className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white border-0">
-              <Flame className="w-3 h-3 mr-1" />
-              Live Now
-            </Badge>
-          )}
-          {entry.bingo_winners > 0 && (
-            <Badge className="bg-gradient-to-r from-emerald-500 to-green-500 text-white border-0">
-              🎉 {entry.bingo_winners} BINGO
-              {entry.bingo_winners === 1 ? '' : 's'}
-            </Badge>
-          )}
-        </div>
-        <p className="text-xs text-slate-500 mt-1">
-          {entry.active_players}{' '}
-          {entry.active_players === 1 ? 'player' : 'players'} participated
-        </p>
-      </div>
-
-      {/* Total deeds */}
-      <div className="flex-shrink-0 text-right">
-        <div className="flex items-center gap-1.5 justify-end">
-          <Heart className="w-4 h-4 text-rose-500 fill-rose-400" />
-          <span className="text-2xl font-black text-slate-800">
-            {entry.total_deeds}
-          </span>
-        </div>
-        <p className="text-[10px] uppercase tracking-wider text-slate-500 font-semibold">
-          total {entry.total_deeds === 1 ? 'Gr8Day Deed' : 'Gr8Day Deeds'}
-        </p>
+      <div className={`w-full ${s.height} bg-gradient-to-b ${s.bg} rounded-t-xl ring-2 ${s.ring} flex items-start justify-center pt-2`}>
+        <span className="text-white/80 font-bold text-sm">{s.label}</span>
       </div>
     </div>
   );
 };
 
+const RankRow: React.FC<{ entry: PlayerRankEntry; rank: number }> = ({ entry, rank }) => (
+  <div className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all ${rank <= 3 ? 'bg-white/10' : 'bg-white/5 hover:bg-white/10'}`}>
+    <span className={`w-7 text-center font-black text-sm flex-shrink-0 ${rank === 1 ? 'text-yellow-300' : rank === 2 ? 'text-slate-300' : rank === 3 ? 'text-amber-500' : 'text-white/40'}`}>
+      {rank <= 3 ? ['🥇','🥈','🥉'][rank-1] : rank}
+    </span>
+    <BadgeImg name={entry.badge_name} emoji={entry.badge_emoji} size="w-7 h-7" />
+    <div className="flex-1 min-w-0">
+      <p className="font-bold text-white truncate text-sm">{entry.display_name}</p>
+      <p className="text-white/40 text-xs">
+        {entry.city && `${entry.city}`}{entry.city && entry.country_code && ', '}
+        {entry.country_code && (COUNTRY_FLAG[entry.country_code] ?? entry.country_name ?? '')}
+      </p>
+    </div>
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
+      <span className="text-white font-black">{entry.deeds}</span>
+    </div>
+  </div>
+);
+
+const GameHistoryRow: React.FC<{ entry: GameLeaderboardEntry; isTop: boolean }> = ({ entry, isTop }) => (
+  <div className={`flex items-center gap-3 px-4 py-3 rounded-xl ${entry.is_current ? 'bg-indigo-500/20 border border-indigo-400/40' : isTop ? 'bg-amber-400/10 border border-amber-400/20' : 'bg-white/5'}`}>
+    <div className="w-10 h-10 rounded-xl bg-white/10 flex flex-col items-center justify-center flex-shrink-0">
+      <span className="text-[9px] text-white/50 uppercase font-bold leading-none">Game</span>
+      <span className="text-sm font-black text-white leading-none">#{entry.game_number}</span>
+    </div>
+    <div className="flex-1 min-w-0">
+      <div className="flex items-center gap-2 flex-wrap">
+        <p className="text-sm font-semibold text-white/90">{weekYearToLabel(entry.week_year)}</p>
+        {entry.is_current && <span className="text-[10px] bg-indigo-500 text-white px-2 py-0.5 rounded-full font-bold flex items-center gap-0.5"><Flame className="w-2.5 h-2.5" /> Live</span>}
+        {entry.bingo_winners > 0 && <span className="text-[10px] bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-2 py-0.5 rounded-full">🎉 {entry.bingo_winners} BINGO</span>}
+      </div>
+      <p className="text-xs text-white/40">{entry.active_players} player{entry.active_players !== 1 ? 's' : ''}</p>
+    </div>
+    <div className="flex items-center gap-1 flex-shrink-0">
+      <Heart className="w-3.5 h-3.5 text-rose-400 fill-rose-400" />
+      <span className="text-white font-black text-lg">{entry.total_deeds}</span>
+    </div>
+  </div>
+);
+
 const Leaderboard: React.FC = () => {
-  const [data, setData] = useState<LeaderboardData | null>(null);
+  const [gameData, setGameData] = useState<LeaderboardData | null>(null);
+  const [playerData, setPlayerData] = useState<PlayerLeaderboardData | null>(null);
+  const [tab, setTab] = useState<'week' | 'alltime' | 'history'>('week');
   const [loading, setLoading] = useState(true);
 
-  const loadLeaderboard = async () => {
-    try {
-      setLoading(true);
-      const res = await getLeaderboard();
-      setData(res);
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'Failed to load leaderboard';
-      toast.error(msg);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   useEffect(() => {
-    loadLeaderboard();
+    Promise.all([getLeaderboard(), getPlayerLeaderboard()])
+      .then(([g, p]) => { setGameData(g); setPlayerData(p); })
+      .finally(() => setLoading(false));
   }, []);
 
-  // Identify the game with the highest total deeds to highlight (excluding empty)
-  const topDeedsGameWY: string | null = (() => {
-    if (!data || data.games.length === 0) return null;
-    const withDeeds = data.games.filter((g) => g.total_deeds > 0);
-    if (withDeeds.length === 0) return null;
-    return withDeeds.reduce((best, g) =>
-      g.total_deeds > best.total_deeds ? g : best,
-    ).week_year;
-  })();
+  const topDeedsWY = gameData?.games.filter(g => g.total_deeds > 0).reduce<GameLeaderboardEntry | null>((b, g) => !b || g.total_deeds > b.total_deeds ? g : b, null)?.week_year ?? null;
+  const ranked = tab === 'week' ? (playerData?.this_week ?? []) : (playerData?.all_time ?? []);
+  const top3 = ranked.slice(0, 3);
+  const rest = ranked.slice(3);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-indigo-50 via-white to-purple-50 flex flex-col">
-      {/* Header */}
-      <header className="bg-white/80 backdrop-blur-sm border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
+    <div className="min-h-screen flex flex-col" style={{ background: 'linear-gradient(160deg, #1e1b4b 0%, #1e3a5f 40%, #064e3b 100%)' }}>
+      {/* Nav */}
+      <header className="sticky top-0 z-10 bg-black/20 backdrop-blur-md border-b border-white/10">
+        <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
           <Link to="/" className="flex items-center gap-2">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center">
-              <Heart className="w-5 h-5 text-white fill-white" />
-            </div>
-            <span className="font-bold text-lg text-slate-800">B Kind</span>
+            <Heart className="w-6 h-6 text-pink-400 fill-pink-400" />
+            <span className="font-bold text-white text-lg">Gr8Day Bingo</span>
           </Link>
-          <nav className="flex items-center gap-1 sm:gap-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/">
-                <Home className="w-4 h-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">Home</span>
-              </Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/game">
-                <Gamepad2 className="w-4 h-4 sm:mr-1.5" />
-                <span className="hidden sm:inline">Play</span>
-              </Link>
-            </Button>
+          <nav className="flex items-center gap-1">
+            <Link to="/" className="flex items-center gap-1 text-white/70 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+              <Home className="w-4 h-4" /><span className="hidden sm:inline ml-1">Home</span>
+            </Link>
+            <Link to="/game" className="flex items-center gap-1 text-white/70 hover:text-white text-sm px-3 py-1.5 rounded-lg hover:bg-white/10 transition-colors">
+              <Gamepad2 className="w-4 h-4" /><span className="hidden sm:inline ml-1">Play</span>
+            </Link>
           </nav>
         </div>
       </header>
 
-      {/* Main */}
-      <main className="max-w-4xl mx-auto px-4 py-8">
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-yellow-400 via-amber-500 to-orange-500 mb-4 shadow-lg">
-            <Trophy className="w-9 h-9 text-white fill-white/90" />
+      <main className="max-w-2xl mx-auto w-full px-4 py-8 flex-1 space-y-8">
+        {/* Hero stat */}
+        <div className="text-center space-y-3">
+          <div className="inline-flex items-center justify-center w-20 h-20 rounded-3xl bg-gradient-to-br from-yellow-400 to-amber-500 shadow-2xl shadow-amber-500/30 mb-2">
+            <Trophy className="w-11 h-11 text-white" />
           </div>
-          <h1 className="text-4xl md:text-5xl font-black text-slate-800 mb-2">
-            Leaderboard
-          </h1>
-          <p className="text-slate-600 max-w-xl mx-auto">
-            Every game totals the Gr8Day Deeds done by <strong>all players</strong>{' '}
-            combined. The whole community scores together! 💖
-          </p>
-          {data && (
-            <div className="mt-4 inline-flex items-center gap-2 bg-white/60 backdrop-blur px-4 py-2 rounded-full border border-slate-200 shadow-sm">
-              <Sparkles className="w-4 h-4 text-amber-500" />
-              <span className="text-sm text-slate-700">
-                <strong className="text-slate-900">{data.grand_total_deeds}</strong>{' '}
-                Gr8Day Deeds done across{' '}
-                <strong className="text-slate-900">{data.total_games}</strong>{' '}
-                {data.total_games === 1 ? 'game' : 'games'}
-              </span>
+          <h1 className="text-5xl md:text-6xl font-black text-white tracking-tight">Leaderboard</h1>
+          {gameData && (
+            <div className="space-y-1">
+              <p className="text-6xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-yellow-300 to-emerald-300">
+                {gameData.grand_total_deeds.toLocaleString()}
+              </p>
+              <p className="text-white/60 text-lg font-medium">Gr8Day Deeds done by this community</p>
+              <div className="inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full mt-2">
+                <Sparkles className="w-4 h-4 text-amber-300" />
+                <span className="text-white/80 text-sm">{gameData.total_games} games · {playerData?.all_time.length ?? 0} players</span>
+              </div>
             </div>
           )}
         </div>
 
-        <Card className="border-slate-200 shadow-lg">
-          <CardHeader className="border-b border-slate-100">
-            <CardTitle className="flex items-center gap-2 text-slate-800">
-              <Trophy className="w-5 h-5 text-amber-500" />
-              Games History
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="p-4 md:p-6">
-            {loading ? (
-              <div className="flex flex-col items-center justify-center py-16">
-                <Loader2 className="w-8 h-8 text-indigo-500 animate-spin mb-3" />
-                <p className="text-sm text-slate-500">Loading leaderboard...</p>
-              </div>
-            ) : !data || data.games.length === 0 ? (
-              <div className="text-center py-16">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
-                  <Trophy className="w-8 h-8 text-slate-400" />
-                </div>
-                <h3 className="text-lg font-bold text-slate-700 mb-2">
-                  No games yet
-                </h3>
-                <p className="text-sm text-slate-500 mb-6 max-w-sm mx-auto">
-                  Start playing to log the first Gr8Day Deeds of this game!
-                </p>
-                <Button
-                  asChild
-                  className="bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700"
-                >
-                  <Link to="/game">
-                    <Gamepad2 className="w-4 h-4 mr-2" />
-                    Join In Now
-                  </Link>
-                </Button>
-              </div>
+        {/* Tabs */}
+        <div className="flex gap-1 bg-white/5 rounded-2xl p-1">
+          {[
+            { key: 'week', label: '🔥 This Week' },
+            { key: 'alltime', label: '🌟 All Time' },
+            { key: 'history', label: '📅 History' },
+          ].map(t => (
+            <button
+              key={t.key}
+              onClick={() => setTab(t.key as typeof tab)}
+              className={`flex-1 py-2.5 rounded-xl text-sm font-bold transition-all ${tab === t.key ? 'bg-white text-slate-900 shadow-lg' : 'text-white/60 hover:text-white'}`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="flex justify-center py-20">
+            <div className="w-10 h-10 border-2 border-emerald-400 border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : tab === 'history' ? (
+          /* Game history */
+          <div className="space-y-2">
+            {(gameData?.games ?? []).length === 0 ? (
+              <p className="text-center text-white/40 py-12">No games yet — start playing!</p>
+            ) : (gameData?.games ?? []).map(g => (
+              <GameHistoryRow key={g.week_year} entry={g} isTop={g.week_year === topDeedsWY} />
+            ))}
+          </div>
+        ) : (
+          /* Player rankings */
+          <div className="space-y-6">
+            {ranked.length === 0 ? (
+              <p className="text-center text-white/40 py-12">
+                {tab === 'week' ? 'No deeds yet this week — be the first!' : 'No players yet.'}
+              </p>
             ) : (
-              <div className="space-y-2">
-                {data.games.map((entry) => (
-                  <GameRow
-                    key={entry.week_year}
-                    entry={entry}
-                    isTopDeeds={entry.week_year === topDeedsGameWY}
-                  />
-                ))}
-              </div>
+              <>
+                {/* Podium — top 3 */}
+                {top3.length >= 1 && (
+                  <div className="flex items-end justify-center gap-4 pt-4 pb-2">
+                    {top3.length >= 2 && <PodiumCard entry={top3[1]} rank={2} />}
+                    <PodiumCard entry={top3[0]} rank={1} />
+                    {top3.length >= 3 && <PodiumCard entry={top3[2]} rank={3} />}
+                  </div>
+                )}
+
+                {/* Rest of list */}
+                {rest.length > 0 && (
+                  <div className="space-y-1.5">
+                    {rest.map((entry, i) => (
+                      <RankRow key={entry.user_id} entry={entry} rank={i + 4} />
+                    ))}
+                  </div>
+                )}
+              </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        )}
 
         {/* How it works */}
-        <Card className="mt-6 border-slate-200 bg-gradient-to-br from-indigo-50 to-purple-50">
-          <CardContent className="p-6">
-            <h3 className="font-bold text-slate-800 mb-3 flex items-center gap-2">
-              <Heart className="w-4 h-4 text-rose-500 fill-rose-400" />
-              How this leaderboard works
-            </h3>
-            <ul className="space-y-2 text-sm text-slate-600">
-              <li className="flex items-start gap-2">
-                <span className="text-indigo-500 font-bold mt-0.5">•</span>
-                <span>
-                  Each <strong>game = one week</strong>. Everyone in the
-                  community plays the same game.
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-indigo-500 font-bold mt-0.5">•</span>
-                <span>
-                  Every Gr8Day Deed marked on <em>anyone's</em> bingo card adds +1 to
-                  that game's total.
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-indigo-500 font-bold mt-0.5">•</span>
-                <span>
-                  Purchased and referral squares don't count — only real good
-                  Gr8Day Deeds.
-                </span>
-              </li>
-              <li className="flex items-start gap-2">
-                <span className="text-indigo-500 font-bold mt-0.5">•</span>
-                <span>A new game starts fresh every Monday.</span>
-              </li>
-            </ul>
-          </CardContent>
-        </Card>
+        <div className="bg-white/5 border border-white/10 rounded-2xl p-5 space-y-3">
+          <h3 className="font-bold text-white flex items-center gap-2">
+            <Heart className="w-4 h-4 text-rose-400 fill-rose-400" /> How this works
+          </h3>
+          <ul className="space-y-2 text-sm text-white/60">
+            <li>• Rankings show <strong className="text-white/80">real deeds only</strong> — purchased and referral squares don't count</li>
+            <li>• <strong className="text-white/80">This Week</strong> resets every Monday — climb the ranks!</li>
+            <li>• <strong className="text-white/80">All Time</strong> is your permanent legacy — every deed counts forever</li>
+            <li>• The <strong className="text-white/80">History</strong> tab shows total community deeds per week</li>
+          </ul>
+        </div>
       </main>
-      <Footer tone="light" />
+
+      <Footer tone="dark" />
     </div>
   );
 };

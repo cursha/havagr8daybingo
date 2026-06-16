@@ -679,6 +679,71 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // ── GET /leaderboard/players ──────────────────────────────────────────────
+    if (method === 'GET' && path === '/leaderboard/players') {
+      const currentWy = getCurrentWeekYear()
+
+      const { data: allCards } = await supabase
+        .from('player_cards')
+        .select('user_id, week_year, completed_cells, purchased_cells, referral_cells')
+
+      const { data: allUsers } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, username, player_number, city, country_id, challenge_level')
+
+      const { data: countries } = await supabase.from('countries').select('id, name, code')
+      const countryMap: Record<number, { name: string; code: string }> = {}
+      for (const c of countries ?? []) countryMap[c.id] = { name: c.name, code: c.code }
+
+      // Count deeds per user: all-time and this week
+      const allTime: Record<string, number> = {}
+      const thisWeek: Record<string, number> = {}
+
+      for (const card of (allCards ?? [])) {
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const purchasedSet = new Set(purchased)
+        const referralSet = new Set(referral)
+        let count = 0
+        for (const idx of completed) {
+          if (!purchasedSet.has(idx) && !referralSet.has(idx) && idx !== 12) count++
+        }
+        allTime[card.user_id] = (allTime[card.user_id] ?? 0) + count
+        if (card.week_year === currentWy) {
+          thisWeek[card.user_id] = (thisWeek[card.user_id] ?? 0) + count
+        }
+      }
+
+      const makeEntry = (u: typeof allUsers[0], deeds: number) => {
+        const country = u.country_id ? countryMap[u.country_id] : null
+        const badge = getBadge(allTime[u.id] ?? 0)
+        return {
+          user_id: u.id,
+          display_name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || `GR8-${u.player_number}`,
+          player_number: u.player_number,
+          city: u.city ?? null,
+          country_name: country?.name ?? null,
+          country_code: country?.code ?? null,
+          deeds,
+          badge_name: badge.name,
+          badge_emoji: badge.emoji,
+        }
+      }
+
+      const allTimeRanked = (allUsers ?? [])
+        .map(u => makeEntry(u, allTime[u.id] ?? 0))
+        .filter(u => u.deeds > 0)
+        .sort((a, b) => b.deeds - a.deeds)
+
+      const thisWeekRanked = (allUsers ?? [])
+        .map(u => makeEntry(u, thisWeek[u.id] ?? 0))
+        .filter(u => u.deeds > 0)
+        .sort((a, b) => b.deeds - a.deeds)
+
+      return jsonResponse({ all_time: allTimeRanked, this_week: thisWeekRanked, current_week_year: currentWy })
+    }
+
     // ── GET /public/countries ─────────────────────────────────────────────────
     if (method === 'GET' && path === '/public/countries') {
       const { data } = await supabase
