@@ -42,6 +42,8 @@ import {
   DeedCategory,
   getAdminDeedCategories,
   updateAdminDeedCategory,
+  DrawWinner,
+  getAdminDrawResults,
 } from '@/lib/game-utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -49,7 +51,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users } from 'lucide-react';
+import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users, Ticket } from 'lucide-react';
 import Footer from '@/components/Footer';
 
 const WIN_CONDITIONS = [
@@ -94,6 +96,9 @@ const AdminPanel: React.FC = () => {
 
   // Prize claims state
   const [prizeClaims, setPrizeClaims] = useState<PrizeClaim[]>([]);
+
+  // Draw results state
+  const [drawWinners, setDrawWinners] = useState<DrawWinner[]>([]);
 
   // Member list state
   const [members, setMembers] = useState<MemberItem[]>([]);
@@ -201,6 +206,15 @@ const AdminPanel: React.FC = () => {
     }
   };
 
+  const loadDrawResults = async () => {
+    try {
+      const res = await getAdminDrawResults();
+      setDrawWinners(res.winners || []);
+    } catch {
+      // silent
+    }
+  };
+
   const handleUpdateClaimStatus = async (id: number, status: string) => {
     try {
       await updatePrizeClaimStatus(id, status);
@@ -243,6 +257,7 @@ const AdminPanel: React.FC = () => {
       loadData();
       loadPendingDeeds('pending');
       loadPrizeClaims();
+      loadDrawResults();
       loadMembers();
       loadMarkLogs();
       loadTeams();
@@ -1519,6 +1534,52 @@ const AdminPanel: React.FC = () => {
                 </div>
               ))}
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Draw Results */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-purple-500" />
+              Weekly Draw Results
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-xs text-slate-500 mb-3">
+              Players automatically enter the draw by achieving Bingo. The draw runs every Monday.
+            </p>
+            {drawWinners.length === 0 ? (
+              <div className="text-center py-8 text-slate-400 text-sm flex flex-col items-center gap-2">
+                <Ticket className="w-8 h-8 text-slate-300" />
+                No draw results yet.
+              </div>
+            ) : (
+              <div className="border rounded-lg overflow-hidden">
+                <div className="max-h-[360px] overflow-y-auto divide-y">
+                  {drawWinners.map((w) => (
+                    <div key={w.id} className="px-3 py-3 text-sm">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <p className="font-semibold text-slate-800">{w.name ?? 'Unknown'}</p>
+                          {w.email && (
+                            <p className="text-slate-500 text-xs">
+                              <a href={`mailto:${w.email}`} className="text-indigo-600 hover:underline">{w.email}</a>
+                            </p>
+                          )}
+                          <p className="text-xs text-slate-400">
+                            {w.week_year} · {w.total_entries} entries · drawn {new Date(w.selected_at).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <span className={`text-xs font-bold px-2 py-1 rounded ${w.odds_weight < 0.5 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                          {w.odds_weight < 0.5 ? 'Repeat winner' : 'Winner'}
+                        </span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 

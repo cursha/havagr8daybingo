@@ -56,6 +56,7 @@ export interface MarkCellResult {
   completed_cells: number[];
   is_bingo: boolean;
   secret_reward?: number;
+  draw_entered?: boolean;
 }
 
 export interface CardData {
@@ -68,6 +69,7 @@ export interface CardData {
   referral_cells: number[];
   is_bingo: boolean;
   dare_clicks: number;
+  draw_entered?: boolean;
 }
 
 export interface DareSpinResult {
@@ -106,6 +108,15 @@ export interface Transaction {
   transaction_type: string;
   item_description: string | null;
   created_at: string | null;
+  stripe_session_id?: string | null;
+  status?: string | null;
+}
+
+// Alias used by WalletPage top-up flow
+export type WalletTransaction = Transaction
+
+export async function createTopup(amount: number): Promise<{ url: string }> {
+  return apiClient.post<{ url: string }>('/payment/create-topup', { amount });
 }
 
 export interface DeedItem {
@@ -556,6 +567,22 @@ export async function getAdminPrizeClaims(): Promise<{ claims: PrizeClaim[] }> {
 
 export async function updatePrizeClaimStatus(id: number, status: string): Promise<{ success: boolean }> {
   return apiClient.put(`/game/admin/prize-claims/${id}`, { status });
+}
+
+// ---------- Draw Results (admin) ----------
+export interface DrawWinner {
+  id: string;
+  user_id: string;
+  week_year: string;
+  selected_at: string;
+  odds_weight: number;
+  name: string | null;
+  email: string | null;
+  total_entries: number;
+}
+
+export async function getAdminDrawResults(): Promise<{ winners: DrawWinner[] }> {
+  return apiClient.get('/game/admin/draw-results');
 }
 
 // ---------- Member list (admin) ----------

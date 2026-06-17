@@ -43,11 +43,19 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
-      - name: Guard — refuse to build without a Stripe publishable key
+      - name: Guard — refuse to build without the Supabase client config
         working-directory: frontend
         run: |
-          if ! grep -q "VITE_STRIPE_PUBLISHABLE_KEY=pk_" .env.production; then
-            echo "::error::.env.production is missing VITE_STRIPE_PUBLISHABLE_KEY (pk_...). Refusing to build a keyless bundle."
+          # These public client values must be present at build time or the app
+          # has nothing to connect to (login + all data calls would fail).
+          # Payments use Stripe hosted checkout, so no publishable key is needed
+          # in the bundle anymore.
+          if ! grep -q "VITE_SUPABASE_ANON_KEY=ey" .env.production; then
+            echo "::error::.env.production is missing VITE_SUPABASE_ANON_KEY. Refusing to build a broken bundle."
+            exit 1
+          fi
+          if ! grep -q "VITE_API_BASE_URL=http" .env.production; then
+            echo "::error::.env.production is missing VITE_API_BASE_URL. Refusing to build a broken bundle."
             exit 1
           fi
 
@@ -55,14 +63,14 @@ jobs:
         working-directory: frontend
         run: node ./node_modules/vite/bin/vite.js build
 
-      - name: Verify the key is actually baked into the bundle
+      - name: Verify the Supabase config is baked into the bundle
         working-directory: frontend
         run: |
-          if ! grep -rq "pk_live_\|pk_test_" dist/assets/; then
-            echo "::error::Built bundle contains no Stripe key. Refusing to deploy."
+          if ! grep -rq "cjvnxvzuummcgzmjkffk.supabase.co" dist/assets/; then
+            echo "::error::Built bundle has no Supabase URL. Refusing to deploy a broken build."
             exit 1
           fi
-          echo "Stripe key confirmed present in built bundle."
+          echo "Supabase config confirmed present in built bundle."
 
       - name: Gentle FTP upload of frontend/dist
         env:
