@@ -1,4 +1,4 @@
-INSERT INTO game_configs (config_key, config_value, description, created_at)
+INSERT INTO game_configs (config_key, config_value, description, updated_at)
 VALUES (
   'country_promotion_threshold',
   '100',

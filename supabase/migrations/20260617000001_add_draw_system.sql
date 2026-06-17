@@ -24,7 +24,7 @@ CREATE INDEX IF NOT EXISTS idx_draw_winners_user_id ON draw_winners(user_id);
 CREATE INDEX IF NOT EXISTS idx_draw_winners_week_year ON draw_winners(week_year);
 
 -- Config: how much weight recent winners get (default 5% of normal)
-INSERT INTO game_configs (key, value, description) VALUES
+INSERT INTO game_configs (config_key, config_value, description) VALUES
   ('recent_winner_weight', '0.05', 'Odds multiplier for players who have won in the last 4 months (0.05 = 5% of normal weight)'),
   ('recent_winner_months', '4', 'Number of months a player is considered a recent winner and receives reduced draw odds')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (config_key) DO NOTHING;

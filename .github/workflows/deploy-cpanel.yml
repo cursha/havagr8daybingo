@@ -41,7 +41,10 @@ jobs:
 
       - name: Install dependencies
         working-directory: frontend
-        run: pnpm install --frozen-lockfile
+        # --ignore-scripts: skip optional native build scripts (esbuild/swc/etc.)
+        # which pnpm otherwise treats as "ignored builds" and exits non-zero on.
+        # The vite build does not need them; this keeps CI install green.
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Guard — refuse to build without the Supabase client config
         working-directory: frontend
