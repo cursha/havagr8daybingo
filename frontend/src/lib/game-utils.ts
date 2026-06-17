@@ -108,6 +108,15 @@ export interface Transaction {
   transaction_type: string;
   item_description: string | null;
   created_at: string | null;
+  stripe_session_id?: string | null;
+  status?: string | null;
+}
+
+// Alias used by WalletPage top-up flow
+export type WalletTransaction = Transaction
+
+export async function createTopup(amount: number): Promise<{ url: string }> {
+  return apiClient.post<{ url: string }>('/payment/create-topup', { amount });
 }
 
 export interface DeedItem {
