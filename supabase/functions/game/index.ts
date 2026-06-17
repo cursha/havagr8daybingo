@@ -265,6 +265,11 @@ Deno.serve(async (req: Request) => {
         }
 
         const completedIdx = parseJsonArr(existing.completed_cells) as number[]
+
+        // Check if player is entered in this week's draw
+        const { data: drawEntry } = await supabase
+          .from('draw_entries').select('id').eq('user_id', user.sub).eq('week_year', existing.week_year).maybeSingle()
+
         return jsonResponse({
           card_id: existing.id,
           week_year: existing.week_year,
@@ -275,6 +280,7 @@ Deno.serve(async (req: Request) => {
           referral_cells: parseJsonArr(existing.referral_cells),
           is_bingo: existing.is_bingo ?? false,
           dare_clicks: existing.dare_clicks ?? 0,
+          draw_entered: drawEntry != null,
         })
       }
 
@@ -472,14 +478,21 @@ Deno.serve(async (req: Request) => {
         note: markNote,
       })
 
-      // First time the card reaches Bingo: congratulate by email (best-effort).
-      if (isBingo && !card.is_bingo && user.email) {
-        const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-        await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+      // First time the card reaches Bingo: enter draw + congratulate by email (best-effort).
+      if (isBingo && !card.is_bingo) {
+        await supabase.from('draw_entries').upsert(
+          { user_id: user.sub, week_year: card.week_year },
+          { onConflict: 'user_id,week_year', ignoreDuplicates: true }
+        )
+        if (user.email) {
+          const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+          await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+        }
       }
 
       const resp: Record<string, unknown> = { success: true, completed_cells: completed, is_bingo: isBingo }
       if (secretRewardAwarded !== null) resp.secret_reward = secretRewardAwarded
+      if (isBingo && !card.is_bingo) resp.draw_entered = true
       return jsonResponse(resp)
     }
 
@@ -560,10 +573,16 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq('id', card_id)
 
-      // First time the card reaches Bingo: congratulate by email (best-effort).
-      if (isBingo && !card.is_bingo && user.email) {
-        const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-        await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+      // First time the card reaches Bingo: enter draw + congratulate by email (best-effort).
+      if (isBingo && !card.is_bingo) {
+        await supabase.from('draw_entries').upsert(
+          { user_id: user.sub, week_year: card.week_year },
+          { onConflict: 'user_id,week_year', ignoreDuplicates: true }
+        )
+        if (user.email) {
+          const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+          await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+        }
       }
 
       return jsonResponse({ success: true, purchased_cells: purchased, new_balance: newBalance, is_bingo: isBingo })
@@ -1906,6 +1925,35 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
+    // ── GET /admin/draw-results ───────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/draw-results') {
+      requireAdmin(authUser)
+      const { data: winners } = await supabase
+        .from('draw_winners')
+        .select('id, user_id, week_year, selected_at, odds_weight, users!inner(first_name, name, username, email)')
+        .order('selected_at', { ascending: false })
+        .limit(20)
+      const { data: entryCounts } = await supabase
+        .from('draw_entries')
+        .select('week_year')
+      const countByWeek: Record<string, number> = {}
+      for (const e of entryCounts ?? []) {
+        countByWeek[e.week_year] = (countByWeek[e.week_year] ?? 0) + 1
+      }
+      return jsonResponse({
+        winners: (winners ?? []).map((w: any) => ({
+          id: w.id,
+          user_id: w.user_id,
+          week_year: w.week_year,
+          selected_at: w.selected_at,
+          odds_weight: w.odds_weight,
+          name: w.users?.first_name ?? w.users?.name ?? w.users?.username ?? null,
+          email: w.users?.email ?? null,
+          total_entries: countByWeek[w.week_year] ?? 0,
+        })),
+      })
+    }
+
     // ── GET /my-team ─────────────────────────────────────────────────────────
     if (method === 'GET' && path === '/my-team') {
       const user = requireAuth(authUser)
@@ -2466,10 +2514,16 @@ Deno.serve(async (req: Request) => {
             updated_at: new Date().toISOString(),
           }).eq('id', card_id)
 
-          // First time reaching bingo via dare: send email (best-effort)
-          if (isBingo2 && !card.is_bingo && user.email) {
-            const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-            await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+          // First time reaching bingo via dare: enter draw + send email (best-effort)
+          if (isBingo2 && !card.is_bingo) {
+            await supabase.from('draw_entries').upsert(
+              { user_id: user.sub, week_year: card.week_year },
+              { onConflict: 'user_id,week_year', ignoreDuplicates: true }
+            )
+            if (user.email) {
+              const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
+              await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
+            }
           }
 
           result.marked_cell_index = markCell.index

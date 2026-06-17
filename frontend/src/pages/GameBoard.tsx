@@ -695,6 +695,9 @@ const GameBoard: React.FC = () => {
                   <p className="text-sm sm:text-base font-bold text-white">
                     Your game is complete. The next game starts Monday.
                   </p>
+                  {card?.draw_entered && (
+                    <p className="text-xs text-amber-200 mt-0.5">🎟 You're entered in this week's draw!</p>
+                  )}
                 </div>
               </div>
               <Button
