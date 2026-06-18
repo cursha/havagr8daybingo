@@ -2096,12 +2096,25 @@ Deno.serve(async (req: Request) => {
       const memberUserIds = (team.team_members ?? []).map((m: any) => m.user_id)
       const { data: cards } = await supabase
         .from('player_cards')
-        .select('id, user_id, week_year, cells, win_condition, completed_cells, purchased_cells, referral_cells, is_bingo')
+        .select('id, user_id, week_year, card_data, win_condition, completed_cells, purchased_cells, referral_cells, is_bingo')
         .eq('week_year', weekYear)
         .in('user_id', memberUserIds)
 
       const cardsByUser: Record<string, any> = {}
-      for (const c of (cards ?? [])) cardsByUser[c.user_id] = c
+      for (const c of (cards ?? [])) {
+        const completed = parseJsonArr(c.completed_cells)
+        const referral = parseJsonArr(c.referral_cells)
+        cardsByUser[c.user_id] = {
+          card_id: c.id,
+          week_year: c.week_year,
+          cells: sanitizeCells(JSON.parse(c.card_data), completed),
+          win_condition: c.win_condition,
+          completed_cells: completed,
+          purchased_cells: parseJsonArr(c.purchased_cells),
+          referral_cells: referral,
+          is_bingo: c.is_bingo,
+        }
+      }
 
       const members = (team.team_members ?? []).map((m: any) => ({
         user_id: m.user_id,
