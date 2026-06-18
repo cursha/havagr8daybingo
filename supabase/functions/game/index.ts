@@ -839,7 +839,7 @@ Deno.serve(async (req: Request) => {
 
       const { data: allUsers } = await supabase
         .from('users')
-        .select('id, first_name, last_name, username, player_number, city, country_id, challenge_level')
+        .select('id, first_name, last_name, username, player_number, city, province_state, country_id, challenge_level')
 
       const { data: countries } = await supabase.from('countries').select('id, name, code')
       const countryMap: Record<number, { name: string; code: string }> = {}
@@ -850,9 +850,9 @@ Deno.serve(async (req: Request) => {
       const thisWeek: Record<string, number> = {}
 
       for (const card of (allCards ?? [])) {
-        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
-        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
-        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : parseJsonArr(card.completed_cells)
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : parseJsonArr(card.purchased_cells)
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : parseJsonArr(card.referral_cells)
         const purchasedSet = new Set(purchased)
         const referralSet = new Set(referral)
         let count = 0
@@ -922,9 +922,9 @@ Deno.serve(async (req: Request) => {
 
       for (const card of (allCardsWithCells ?? [])) {
         const cells: Cell[] = (() => { try { return JSON.parse(card.card_data ?? '[]') } catch { return [] } })()
-        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
-        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
-        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : parseJsonArr(card.completed_cells)
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : parseJsonArr(card.purchased_cells)
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : parseJsonArr(card.referral_cells)
         const purchasedSet = new Set(purchased)
         const referralSet = new Set(referral)
 
@@ -1014,9 +1014,9 @@ Deno.serve(async (req: Request) => {
       let thisWeekDeeds = 0
       let lastWeekDeeds = 0
       for (const card of (allCards ?? [])) {
-        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
-        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
-        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : parseJsonArr(card.completed_cells)
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : parseJsonArr(card.purchased_cells)
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : parseJsonArr(card.referral_cells)
         const ps = new Set(purchased); const rs = new Set(referral)
         const count = completed.filter(idx => !ps.has(idx) && !rs.has(idx) && idx !== 12).length
         if (card.week_year === currentWy) thisWeekDeeds += count
@@ -1053,6 +1053,48 @@ Deno.serve(async (req: Request) => {
       // ── Total referrals ──────────────────────────────────────────────────────
       const totalReferrals = (allReferrals ?? []).length
 
+      // ── Geographic drill-down tree: country → province/state → city ──────────
+      // Groups players (and their all-time deeds) by location so the leaderboard
+      // can drill down with plain lists — no map graphics needed.
+      type CityNode = { name: string; deeds: number; players: number }
+      type StateNode = { name: string; deeds: number; players: number; cities: Record<string, CityNode> }
+      type CountryNode = { code: string; name: string; deeds: number; players: number; states: Record<string, StateNode> }
+      const geoMap: Record<string, CountryNode> = {}
+      for (const u of (allUsers ?? [])) {
+        const country = u.country_id ? countryMap[u.country_id] : null
+        const cName = country?.name ?? 'Unknown'
+        const cCode = country?.code ?? 'XX'
+        const sName = (u.province_state && String(u.province_state).trim()) || 'Unspecified'
+        const cityName = (u.city && String(u.city).trim()) || 'Unspecified'
+        const deeds = allTime[u.id] ?? 0
+        if (!geoMap[cName]) geoMap[cName] = { code: cCode, name: cName, deeds: 0, players: 0, states: {} }
+        const cn = geoMap[cName]; cn.deeds += deeds; cn.players += 1
+        if (!cn.states[sName]) cn.states[sName] = { name: sName, deeds: 0, players: 0, cities: {} }
+        const sn = cn.states[sName]; sn.deeds += deeds; sn.players += 1
+        if (!sn.cities[cityName]) sn.cities[cityName] = { name: cityName, deeds: 0, players: 0 }
+        const cityNode = sn.cities[cityName]; cityNode.deeds += deeds; cityNode.players += 1
+      }
+      const geoTree = Object.values(geoMap)
+        .map(cn => ({
+          code: cn.code, name: cn.name, deeds: cn.deeds, players: cn.players,
+          states: Object.values(cn.states)
+            .map(sn => ({
+              name: sn.name, deeds: sn.deeds, players: sn.players,
+              cities: Object.values(sn.cities).sort((a, b) => b.deeds - a.deeds),
+            }))
+            .sort((a, b) => b.deeds - a.deeds),
+        }))
+        .sort((a, b) => b.deeds - a.deeds)
+
+      // Full deed breakdown (every completed deed with its count), for deed drill-down
+      const deedBreakdown = Object.entries(deedCounts)
+        .map(([id, count]) => {
+          const deed = (allDeeds ?? []).find(d => d.id === parseInt(id))
+          return { deed_id: parseInt(id), deed_text: deed?.deed_text ?? '', category: deed?.category ?? '', count }
+        })
+        .filter(d => d.deed_text)
+        .sort((a, b) => b.count - a.count)
+
       return jsonResponse({
         all_time: allTimeRanked,
         this_week: thisWeekRanked,
@@ -1069,6 +1111,8 @@ Deno.serve(async (req: Request) => {
         new_players_this_week: newPlayersThisWeek,
         new_players_last_week: newPlayersLastWeek,
         total_referrals: totalReferrals,
+        geo_tree: geoTree,
+        deed_breakdown: deedBreakdown,
       })
     }
 
@@ -2687,9 +2731,9 @@ Deno.serve(async (req: Request) => {
 
       let totalDeeds = 0
       for (const card of (cards ?? [])) {
-        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
-        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
-        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : parseJsonArr(card.completed_cells)
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : parseJsonArr(card.purchased_cells)
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : parseJsonArr(card.referral_cells)
         const purchasedSet = new Set(purchased)
         const referralSet = new Set(referral)
         for (const idx of completed) {
@@ -2743,9 +2787,9 @@ Deno.serve(async (req: Request) => {
       // Tally deeds per user
       const deedCounts: Record<string, number> = {}
       for (const card of (allCards ?? [])) {
-        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : []
-        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : []
-        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : []
+        const completed: number[] = Array.isArray(card.completed_cells) ? card.completed_cells : parseJsonArr(card.completed_cells)
+        const purchased: number[] = Array.isArray(card.purchased_cells) ? card.purchased_cells : parseJsonArr(card.purchased_cells)
+        const referral: number[] = Array.isArray(card.referral_cells) ? card.referral_cells : parseJsonArr(card.referral_cells)
         const purchasedSet = new Set(purchased)
         const referralSet = new Set(referral)
         let count = 0
