@@ -787,6 +787,18 @@ export async function adminGetPlayerCard(playerNumber: number): Promise<AdminPla
   return apiClient.get<AdminPlayerCardResult>(`/game/admin/player-card?player_number=${playerNumber}`);
 }
 
+export interface AdminPlayerMatch {
+  id: string;
+  player_number: number;
+  display_name: string;
+  email: string | null;
+}
+
+export async function adminSearchPlayersByLastName(lastName: string): Promise<AdminPlayerMatch[]> {
+  const data = await apiClient.get<{ matches: AdminPlayerMatch[] }>(`/game/admin/player-card?last_name=${encodeURIComponent(lastName)}`);
+  return data.matches;
+}
+
 // ── Streak API ────────────────────────────────────────────────────────────────
 
 export async function getMyStreak(): Promise<StreakData> {

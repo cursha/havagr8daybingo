@@ -1515,11 +1515,30 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
-    // ── GET /admin/player-card?player_number=XXXXX ───────────────────────────
+    // ── GET /admin/player-card?player_number=X  OR  ?last_name=Smith ────────
     if (method === 'GET' && path === '/admin/player-card') {
       requireAdmin(authUser)
-      const pnStr = new URL(req.url).searchParams.get('player_number')
-      if (!pnStr) return errorResponse('player_number is required', 400)
+      const params = new URL(req.url).searchParams
+      const pnStr = params.get('player_number')
+      const lastNameQ = params.get('last_name')?.trim()
+
+      // Search by last name: return a list of matches (no card data)
+      if (lastNameQ) {
+        const { data: matches } = await supabase
+          .from('users')
+          .select('id, first_name, last_name, username, email, player_number')
+          .ilike('last_name', `%${lastNameQ}%`)
+          .order('last_name', { ascending: true })
+          .limit(20)
+        return jsonResponse({ matches: (matches ?? []).map((u) => ({
+          id: u.id,
+          player_number: u.player_number,
+          display_name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || `GR8-${u.player_number}`,
+          email: u.email,
+        })) })
+      }
+
+      if (!pnStr) return errorResponse('player_number or last_name is required', 400)
       const pn = parseInt(pnStr)
       if (isNaN(pn)) return errorResponse('player_number must be a number', 400)
 

@@ -50,7 +50,9 @@ import {
   adminUpdateStreakMilestone,
   adminDeleteStreakMilestone,
   AdminPlayerCardResult,
+  AdminPlayerMatch,
   adminGetPlayerCard,
+  adminSearchPlayersByLastName,
   CardData,
   CellData,
 } from '@/lib/game-utils';
@@ -146,7 +148,9 @@ const AdminPanel: React.FC = () => {
 
   // Player card viewer state
   const [cardViewerPN, setCardViewerPN] = useState('');
+  const [cardViewerLastName, setCardViewerLastName] = useState('');
   const [cardViewerResult, setCardViewerResult] = useState<AdminPlayerCardResult | null>(null);
+  const [cardViewerMatches, setCardViewerMatches] = useState<AdminPlayerMatch[]>([]);
   const [cardViewerLoading, setCardViewerLoading] = useState(false);
 
   // Streak milestones state
@@ -285,11 +289,43 @@ const AdminPanel: React.FC = () => {
     if (isNaN(pn)) { toast.error('Enter a valid player number'); return; }
     setCardViewerLoading(true);
     setCardViewerResult(null);
+    setCardViewerMatches([]);
     try {
       const result = await adminGetPlayerCard(pn);
       setCardViewerResult(result);
     } catch (err: any) {
       toast.error(err?.message || 'Player not found');
+    } finally {
+      setCardViewerLoading(false);
+    }
+  };
+
+  const handleCardViewerLastNameSearch = async () => {
+    const q = cardViewerLastName.trim();
+    if (!q) { toast.error('Enter a last name to search'); return; }
+    setCardViewerLoading(true);
+    setCardViewerResult(null);
+    setCardViewerMatches([]);
+    try {
+      const matches = await adminSearchPlayersByLastName(q);
+      if (matches.length === 0) toast.info('No players found with that last name');
+      setCardViewerMatches(matches);
+    } catch (err: any) {
+      toast.error(err?.message || 'Search failed');
+    } finally {
+      setCardViewerLoading(false);
+    }
+  };
+
+  const handleCardViewerSelectMatch = async (pn: number) => {
+    setCardViewerMatches([]);
+    setCardViewerLoading(true);
+    setCardViewerResult(null);
+    try {
+      const result = await adminGetPlayerCard(pn);
+      setCardViewerResult(result);
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to load card');
     } finally {
       setCardViewerLoading(false);
     }
@@ -995,28 +1031,78 @@ const AdminPanel: React.FC = () => {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            <p className="text-xs text-slate-500">Look up any player's current bingo card by player number. Read-only view.</p>
-            <div className="flex gap-2">
-              <Input
-                type="number"
-                placeholder="Player number (e.g. 10001)"
-                value={cardViewerPN}
-                onChange={(e) => setCardViewerPN(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handleCardViewerLookup()}
-                className="max-w-xs"
-              />
-              <Button
-                onClick={handleCardViewerLookup}
-                disabled={cardViewerLoading}
-                className="bg-indigo-600 hover:bg-indigo-700 text-white"
-              >
-                {cardViewerLoading ? 'Loading…' : 'Look Up'}
-              </Button>
-              {cardViewerResult && (
-                <Button variant="ghost" onClick={() => setCardViewerResult(null)}>
-                  <X className="w-4 h-4" />
+            <p className="text-xs text-slate-500">Look up any player's current bingo card by player number or last name. Read-only view.</p>
+
+            {/* Search by last name */}
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-slate-600">Search by last name</p>
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Last name (e.g. Smith)"
+                  value={cardViewerLastName}
+                  onChange={(e) => setCardViewerLastName(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCardViewerLastNameSearch()}
+                  className="max-w-xs"
+                />
+                <Button
+                  onClick={handleCardViewerLastNameSearch}
+                  disabled={cardViewerLoading}
+                  variant="outline"
+                >
+                  {cardViewerLoading ? 'Searching…' : <><Search className="w-4 h-4 mr-1" /> Search</>}
                 </Button>
-              )}
+              </div>
+            </div>
+
+            {/* Last name matches */}
+            {cardViewerMatches.length > 0 && (
+              <div className="border rounded-lg overflow-hidden divide-y">
+                {cardViewerMatches.map((m) => (
+                  <button
+                    key={m.id}
+                    onClick={() => handleCardViewerSelectMatch(m.player_number)}
+                    className="w-full text-left px-3 py-2 hover:bg-indigo-50 transition-colors flex items-center justify-between gap-2"
+                  >
+                    <div>
+                      <span className="font-medium text-slate-800 text-sm">{m.display_name}</span>
+                      {m.email && <span className="text-xs text-slate-400 ml-2">{m.email}</span>}
+                    </div>
+                    <span className="text-xs text-slate-400 font-mono">GR8-{m.player_number}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* Divider */}
+            <div className="flex items-center gap-2 text-xs text-slate-400">
+              <div className="flex-1 border-t" /><span>or</span><div className="flex-1 border-t" />
+            </div>
+
+            {/* Search by player number */}
+            <div className="space-y-1">
+              <p className="text-xs font-medium text-slate-600">Look up by player number</p>
+              <div className="flex gap-2">
+                <Input
+                  type="number"
+                  placeholder="Player number (e.g. 10001)"
+                  value={cardViewerPN}
+                  onChange={(e) => setCardViewerPN(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCardViewerLookup()}
+                  className="max-w-xs"
+                />
+                <Button
+                  onClick={handleCardViewerLookup}
+                  disabled={cardViewerLoading}
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
+                >
+                  {cardViewerLoading ? 'Loading…' : 'View Card'}
+                </Button>
+                {cardViewerResult && (
+                  <Button variant="ghost" onClick={() => { setCardViewerResult(null); setCardViewerMatches([]); }}>
+                    <X className="w-4 h-4" />
+                  </Button>
+                )}
+              </div>
             </div>
 
             {cardViewerResult && (
