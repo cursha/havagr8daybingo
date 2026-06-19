@@ -4,7 +4,6 @@ import {
   DeedItem,
   PendingDeed,
   PrizeClaim,
-  CellMarkLogEntry,
   TeamItem,
   adminVerify,
   getAdminConfig,
@@ -29,8 +28,6 @@ import {
   getStates,
   CountryOption,
   StateOption,
-  adminGetCellMarkLog,
-  adminVoidCell,
   adminTriggerWeeklyReset,
   adminAnnounceGame,
   adminGetTeams,
@@ -126,12 +123,6 @@ const AdminPanel: React.FC = () => {
   const [playerForm, setPlayerForm] = useState({ first_name: '', last_name: '', email: '', username: '', password: '', role: 'user', city: '', country_id: '' as string | number, state_id: '' as string | number, challenge_level: '' as string | number });
   const [playerFormLoading, setPlayerFormLoading] = useState(false);
 
-  // Void cell state
-  const [markLogs, setMarkLogs] = useState<CellMarkLogEntry[]>([]);
-  const [voidCardId, setVoidCardId] = useState('');
-  const [voidCellIndex, setVoidCellIndex] = useState('');
-  const [voidReason, setVoidReason] = useState('');
-  const [voidLoading, setVoidLoading] = useState(false);
 
   // Weekly reset state
   const [weeklyResetLoading, setWeeklyResetLoading] = useState(false);
@@ -261,15 +252,6 @@ const AdminPanel: React.FC = () => {
     try {
       const res = await getAdminMembers();
       setMembers(res.members || []);
-    } catch {
-      // silent
-    }
-  };
-
-  const loadMarkLogs = async () => {
-    try {
-      const logs = await adminGetCellMarkLog(100);
-      setMarkLogs(logs);
     } catch {
       // silent
     }
@@ -409,7 +391,6 @@ const AdminPanel: React.FC = () => {
       loadPrizeClaims();
       loadDrawResults();
       loadMembers();
-      loadMarkLogs();
       loadTeams();
       getCountries().then(setCountries).catch(() => {});
     }
@@ -472,32 +453,6 @@ const AdminPanel: React.FC = () => {
       loadPendingDeeds(pendingFilter);
     }
   }, [pendingFilter]);
-
-  const handleVoidCell = async () => {
-    const cardId = parseInt(voidCardId.trim());
-    const cellIndex = parseInt(voidCellIndex.trim());
-    if (isNaN(cardId) || isNaN(cellIndex)) {
-      toast.error('Card ID and cell index must be numbers.');
-      return;
-    }
-    if (!voidReason.trim()) {
-      toast.error('Please enter a reason for voiding this cell.');
-      return;
-    }
-    setVoidLoading(true);
-    try {
-      await adminVoidCell(cardId, cellIndex, voidReason.trim());
-      toast.success(`Cell ${cellIndex} on card ${cardId} voided.`);
-      setVoidCardId('');
-      setVoidCellIndex('');
-      setVoidReason('');
-      loadMarkLogs();
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to void cell.');
-    } finally {
-      setVoidLoading(false);
-    }
-  };
 
   const handleCreateTeam = async () => {
     if (!newTeamName.trim()) { toast.error('Team name is required.'); return; }
@@ -1034,7 +989,6 @@ const AdminPanel: React.FC = () => {
               { id: 'section-deeds', label: 'Deeds', icon: <Target className="w-3.5 h-3.5" /> },
               { id: 'section-draw', label: 'Draw', icon: <Ticket className="w-3.5 h-3.5" /> },
               { id: 'section-prize-claims', label: 'Prize Claims', icon: <Gift className="w-3.5 h-3.5" /> },
-              { id: 'section-void', label: 'Void Cell', icon: <XCircle className="w-3.5 h-3.5" /> },
               { id: 'section-announce', label: 'Announce', icon: <Mail className="w-3.5 h-3.5" /> },
               { id: 'section-reset', label: 'Reset', icon: <Settings className="w-3.5 h-3.5" /> },
             ].map(({ id, label, icon }) => (
@@ -2460,92 +2414,6 @@ const AdminPanel: React.FC = () => {
                       </div>
                     </div>
                   ))}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-        </section>
-
-        {/* Void Cell */}
-        <section id="section-void">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <XCircle className="w-5 h-5 text-red-500" />
-              Void a Cell
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <p className="text-sm text-slate-500">
-              Remove a marked cell from a player's card. This cannot be undone and is logged for audit purposes.
-            </p>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Card ID</label>
-                <Input
-                  placeholder="e.g. 42"
-                  value={voidCardId}
-                  onChange={(e) => setVoidCardId(e.target.value)}
-                />
-              </div>
-              <div className="space-y-1">
-                <label className="text-xs font-medium text-slate-600">Cell Index (0–24)</label>
-                <Input
-                  placeholder="e.g. 12"
-                  value={voidCellIndex}
-                  onChange={(e) => setVoidCellIndex(e.target.value)}
-                />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <label className="text-xs font-medium text-slate-600">Reason (required)</label>
-              <Input
-                placeholder="e.g. Player admitted they didn't complete the deed"
-                value={voidReason}
-                onChange={(e) => setVoidReason(e.target.value)}
-              />
-            </div>
-            <Button
-              onClick={handleVoidCell}
-              disabled={voidLoading}
-              className="bg-red-600 hover:bg-red-700 text-white font-bold"
-            >
-              {voidLoading ? 'Voiding…' : 'Void Cell'}
-            </Button>
-
-            {markLogs.length > 0 && (
-              <div className="mt-4">
-                <p className="text-xs font-semibold text-slate-500 mb-2">Recent mark activity (last 100)</p>
-                <div className="max-h-64 overflow-y-auto border rounded-lg">
-                  <table className="w-full text-xs">
-                    <thead className="bg-slate-50 sticky top-0">
-                      <tr>
-                        <th className="px-2 py-1.5 text-left">When</th>
-                        <th className="px-2 py-1.5 text-left">Player</th>
-                        <th className="px-2 py-1.5 text-left">Card</th>
-                        <th className="px-2 py-1.5 text-left">Cell</th>
-                        <th className="px-2 py-1.5 text-left">Action</th>
-                        <th className="px-2 py-1.5 text-left">Note / Reason</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {markLogs.map((log) => (
-                        <tr key={log.id} className={log.action === 'void' ? 'bg-red-50' : 'hover:bg-slate-50'}>
-                          <td className="px-2 py-1.5 text-slate-500">{new Date(log.created_at).toLocaleString()}</td>
-                          <td className="px-2 py-1.5">{log.users?.username ?? log.user_id.slice(0, 8)}</td>
-                          <td className="px-2 py-1.5">{log.card_id}</td>
-                          <td className="px-2 py-1.5">{log.cell_index}</td>
-                          <td className="px-2 py-1.5">
-                            <span className={`font-semibold ${log.action === 'void' ? 'text-red-600' : 'text-emerald-600'}`}>
-                              {log.action}
-                            </span>
-                          </td>
-                          <td className="px-2 py-1.5 text-slate-500">{log.note ?? log.void_reason ?? '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
                 </div>
               </div>
             )}
