@@ -768,6 +768,25 @@ export async function rejectOrCancelTrade(id: number): Promise<{ success: boolea
   return apiClient.post<{ success: boolean }>(`/game/my-team/trades/${id}/reject`, {});
 }
 
+// ── Admin: player card viewer ─────────────────────────────────────────────────
+
+export interface AdminPlayerCardResult {
+  player: {
+    id: string;
+    player_number: number;
+    display_name: string;
+    email: string | null;
+    current_streak_days: number;
+    longest_streak_days: number;
+    last_valid_deed_date: string | null;
+  };
+  card: CardData | null;
+}
+
+export async function adminGetPlayerCard(playerNumber: number): Promise<AdminPlayerCardResult> {
+  return apiClient.get<AdminPlayerCardResult>(`/game/admin/player-card?player_number=${playerNumber}`);
+}
+
 // ── Streak API ────────────────────────────────────────────────────────────────
 
 export async function getMyStreak(): Promise<StreakData> {

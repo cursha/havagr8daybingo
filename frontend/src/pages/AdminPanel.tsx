@@ -49,14 +49,19 @@ import {
   adminCreateStreakMilestone,
   adminUpdateStreakMilestone,
   adminDeleteStreakMilestone,
+  AdminPlayerCardResult,
+  adminGetPlayerCard,
+  CardData,
+  CellData,
 } from '@/lib/game-utils';
+import BingoCell from '@/components/BingoCell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
-import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users, Ticket } from 'lucide-react';
+import { ArrowLeft, Heart, Lock, Settings, Plus, Trash2, Save, Edit2, X, Target, Inbox, Check, XCircle, Lightbulb, Gift, Upload, Download, FileSpreadsheet, Printer, Trophy, Mail, Users, Ticket, Search, Flame } from 'lucide-react';
 import Footer from '@/components/Footer';
 
 const WIN_CONDITIONS = [
@@ -138,6 +143,11 @@ const AdminPanel: React.FC = () => {
 
   // Deed categories state
   const [deedCategories, setDeedCategories] = useState<DeedCategory[]>([]);
+
+  // Player card viewer state
+  const [cardViewerPN, setCardViewerPN] = useState('');
+  const [cardViewerResult, setCardViewerResult] = useState<AdminPlayerCardResult | null>(null);
+  const [cardViewerLoading, setCardViewerLoading] = useState(false);
 
   // Streak milestones state
   const [streakMilestones, setStreakMilestones] = useState<StreakMilestone[]>([]);
@@ -267,6 +277,21 @@ const AdminPanel: React.FC = () => {
       setTeams(t);
     } catch {
       // silent
+    }
+  };
+
+  const handleCardViewerLookup = async () => {
+    const pn = parseInt(cardViewerPN.trim());
+    if (isNaN(pn)) { toast.error('Enter a valid player number'); return; }
+    setCardViewerLoading(true);
+    setCardViewerResult(null);
+    try {
+      const result = await adminGetPlayerCard(pn);
+      setCardViewerResult(result);
+    } catch (err: any) {
+      toast.error(err?.message || 'Player not found');
+    } finally {
+      setCardViewerLoading(false);
     }
   };
 
@@ -961,6 +986,118 @@ const AdminPanel: React.FC = () => {
       </header>
 
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
+        {/* Player Card Viewer */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Search className="w-5 h-5 text-indigo-500" />
+              View Player Card
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-xs text-slate-500">Look up any player's current bingo card by player number. Read-only view.</p>
+            <div className="flex gap-2">
+              <Input
+                type="number"
+                placeholder="Player number (e.g. 10001)"
+                value={cardViewerPN}
+                onChange={(e) => setCardViewerPN(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleCardViewerLookup()}
+                className="max-w-xs"
+              />
+              <Button
+                onClick={handleCardViewerLookup}
+                disabled={cardViewerLoading}
+                className="bg-indigo-600 hover:bg-indigo-700 text-white"
+              >
+                {cardViewerLoading ? 'Loading…' : 'Look Up'}
+              </Button>
+              {cardViewerResult && (
+                <Button variant="ghost" onClick={() => setCardViewerResult(null)}>
+                  <X className="w-4 h-4" />
+                </Button>
+              )}
+            </div>
+
+            {cardViewerResult && (
+              <div className="space-y-4">
+                {/* Player summary */}
+                <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex flex-wrap gap-4 text-sm">
+                  <div>
+                    <p className="text-xs text-slate-500">Player</p>
+                    <p className="font-semibold text-slate-800">{cardViewerResult.player.display_name}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">GR8 Number</p>
+                    <p className="font-mono font-semibold text-slate-800">GR8-{cardViewerResult.player.player_number}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Email</p>
+                    <p className="text-slate-700">{cardViewerResult.player.email ?? '—'}</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500 flex items-center gap-1"><Flame className="w-3 h-3 text-orange-400" /> Current Streak</p>
+                    <p className="font-semibold text-orange-600">{cardViewerResult.player.current_streak_days} days</p>
+                  </div>
+                  <div>
+                    <p className="text-xs text-slate-500">Best Streak</p>
+                    <p className="font-semibold text-indigo-600">{cardViewerResult.player.longest_streak_days} days</p>
+                  </div>
+                </div>
+
+                {cardViewerResult.card === null ? (
+                  <div className="text-center py-8 text-slate-400 text-sm">
+                    No card generated for the current week.
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-xs text-slate-500">
+                      <span>Week: <strong className="text-slate-700">{cardViewerResult.card.week_year}</strong></span>
+                      <span>
+                        Completed: <strong className="text-slate-700">{cardViewerResult.card.completed_cells.length + cardViewerResult.card.purchased_cells.length}</strong> squares
+                        {cardViewerResult.card.is_bingo && <span className="ml-2 text-emerald-600 font-bold">🎉 BINGO!</span>}
+                      </span>
+                    </div>
+
+                    {/* Bingo grid — locked/read-only */}
+                    <div className="bg-indigo-950 rounded-xl p-3">
+                      {/* Column headers */}
+                      <div className="grid grid-cols-5 gap-1 mb-1">
+                        {['GR', '8', 'D', 'A', 'Y'].map((l, i) => (
+                          <div key={i} className="text-center text-xs font-black text-white/60 py-1">{l}</div>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-5 gap-1">
+                        {cardViewerResult.card.cells.map((cell: CellData) => (
+                          <BingoCell
+                            key={cell.index}
+                            cell={cell}
+                            completedCells={cardViewerResult.card!.completed_cells}
+                            purchasedCells={cardViewerResult.card!.purchased_cells}
+                            referralCells={cardViewerResult.card!.referral_cells}
+                            onMark={() => {}}
+                            onUnmark={() => {}}
+                            onPurchase={() => {}}
+                            locked={true}
+                          />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Legend */}
+                    <div className="flex flex-wrap gap-3 text-xs text-slate-500 pt-1">
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-emerald-500 inline-block" /> Completed deed</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-amber-400 inline-block" /> Purchased square</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-teal-400 inline-block" /> Referral free</span>
+                      <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-white border inline-block" /> Uncompleted</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
         {/* Teams */}
         <Card>
           <CardHeader>

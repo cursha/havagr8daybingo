@@ -1515,6 +1515,53 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
+    // ── GET /admin/player-card?player_number=XXXXX ───────────────────────────
+    if (method === 'GET' && path === '/admin/player-card') {
+      requireAdmin(authUser)
+      const pnStr = new URL(req.url).searchParams.get('player_number')
+      if (!pnStr) return errorResponse('player_number is required', 400)
+      const pn = parseInt(pnStr)
+      if (isNaN(pn)) return errorResponse('player_number must be a number', 400)
+
+      const { data: targetUser } = await supabase
+        .from('users')
+        .select('id, first_name, last_name, username, email, player_number, current_streak_days, longest_streak_days, last_valid_deed_date')
+        .eq('player_number', pn)
+        .maybeSingle()
+      if (!targetUser) return errorResponse('Player not found', 404)
+
+      const weekYear = getCurrentWeekYear()
+      const { data: card } = await supabase
+        .from('player_cards')
+        .select('*')
+        .eq('user_id', targetUser.id)
+        .eq('week_year', weekYear)
+        .maybeSingle()
+
+      return jsonResponse({
+        player: {
+          id: targetUser.id,
+          player_number: targetUser.player_number,
+          display_name: [targetUser.first_name, targetUser.last_name].filter(Boolean).join(' ') || targetUser.username || `GR8-${targetUser.player_number}`,
+          email: targetUser.email,
+          current_streak_days: targetUser.current_streak_days ?? 0,
+          longest_streak_days: targetUser.longest_streak_days ?? 0,
+          last_valid_deed_date: targetUser.last_valid_deed_date ?? null,
+        },
+        card: card ? {
+          card_id: card.id,
+          week_year: card.week_year,
+          cells: sanitizeCells(JSON.parse(card.card_data), parseJsonArr(card.completed_cells)),
+          win_condition: card.win_condition,
+          completed_cells: parseJsonArr(card.completed_cells),
+          purchased_cells: parseJsonArr(card.purchased_cells),
+          referral_cells: parseJsonArr(card.referral_cells),
+          is_bingo: card.is_bingo,
+          dare_clicks: card.dare_clicks ?? 0,
+        } : null,
+      })
+    }
+
     // ── GET /admin/members ────────────────────────────────────────────────────
     if (method === 'GET' && path === '/admin/members') {
       const { data } = await supabase
