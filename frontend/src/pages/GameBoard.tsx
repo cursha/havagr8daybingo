@@ -26,13 +26,18 @@ import {
   getMyProfile,
   getQuickDeeds,
   tapQuickDeed,
+  getMyStreak,
   QuickDeed,
+  StreakData,
+  StreakMilestoneHit,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import CelebrationOverlay from '@/components/CelebrationOverlay';
 import RegistrationModal from '@/components/RegistrationModal';
 import DareModal from '@/components/DareModal';
 import EditProfileModal from '@/components/EditProfileModal';
+import StreakDisplay from '@/components/StreakDisplay';
+import StreakMilestoneModal from '@/components/StreakMilestoneModal';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -92,6 +97,8 @@ const GameBoard: React.FC = () => {
   const [quickDeedTapping, setQuickDeedTapping] = useState<number | null>(null);
   const [quickDeedCounts, setQuickDeedCounts] = useState<Record<number, number>>({});
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [streak, setStreak] = useState<StreakData | null>(null);
+  const [streakMilestones, setStreakMilestones] = useState<StreakMilestoneHit[]>([]);
 
   useEffect(() => {
     getPublicPrize()
@@ -122,6 +129,9 @@ const GameBoard: React.FC = () => {
           setPendingTradeCount(pending);
         })
         .catch(() => setPendingTradeCount(0));
+      getMyStreak()
+        .then((s) => setStreak(s))
+        .catch(() => {});
     }
   }, [user]);
 
@@ -202,6 +212,17 @@ const GameBoard: React.FC = () => {
 
       if (result.is_bingo) {
         setTimeout(() => setShowCelebration(true), 500);
+      }
+
+      if (result.streak_update) {
+        const su = result.streak_update;
+        setStreak((prev) => prev
+          ? { ...prev, current_streak_days: su.current_streak_days, longest_streak_days: su.longest_streak_days }
+          : null
+        );
+        if (su.new_milestones.length > 0) {
+          setStreakMilestones(su.new_milestones);
+        }
       }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to mark cell');
@@ -325,9 +346,19 @@ const GameBoard: React.FC = () => {
     if (quickDeedTapping) return;
     setQuickDeedTapping(deed.id);
     try {
-      await tapQuickDeed(deed.id);
+      const result = await tapQuickDeed(deed.id);
       setQuickDeedCounts(prev => ({ ...prev, [deed.id]: (prev[deed.id] ?? 0) + 1 }));
       toast.success(`${deed.emoji} ${deed.label} — thank you for the kindness!`);
+      if (result?.streak_update) {
+        const su = result.streak_update;
+        setStreak((prev) => prev
+          ? { ...prev, current_streak_days: su.current_streak_days, longest_streak_days: su.longest_streak_days }
+          : null
+        );
+        if (su.new_milestones.length > 0) {
+          setStreakMilestones(su.new_milestones);
+        }
+      }
     } catch {
       toast.error('Could not record your deed. Please try again.');
     } finally {
@@ -638,6 +669,29 @@ const GameBoard: React.FC = () => {
           </div>
         )}
 
+        {/* Quick Kindness — moved to top so it's always visible above the card */}
+        {user && quickDeeds.length > 0 && (
+          <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 mb-4">
+            <h3 className="font-bold text-white/80 mb-3 text-xs uppercase tracking-wider">Quick Kindness — tap when you do it</h3>
+            <div className="flex flex-wrap gap-3 justify-center">
+              {quickDeeds.map(deed => (
+                <button
+                  key={deed.id}
+                  onClick={() => handleQuickDeedTap(deed)}
+                  disabled={quickDeedTapping === deed.id}
+                  className="flex flex-col items-center gap-1.5 bg-white/10 hover:bg-emerald-500/20 active:scale-95 border border-white/20 hover:border-emerald-400/50 rounded-2xl px-5 py-3 transition-all duration-150 disabled:opacity-50"
+                >
+                  <span className="text-2xl">{deed.emoji}</span>
+                  <span className="text-xs font-semibold text-white/80">{deed.label}</span>
+                  {(quickDeedCounts[deed.id] ?? 0) > 0 && (
+                    <span className="text-[10px] text-emerald-400 font-bold">+{quickDeedCounts[deed.id]} today</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Title + Game Mode Display */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-4">
           <div>
@@ -784,26 +838,10 @@ const GameBoard: React.FC = () => {
           </div>
         )}
 
-        {/* Quick Deed Buttons */}
-        {user && quickDeeds.length > 0 && (
-          <div className="bg-white/5 backdrop-blur-sm rounded-xl border border-white/10 p-4 mb-4">
-            <h3 className="font-bold text-white/80 mb-3 text-xs uppercase tracking-wider">Quick Kindness — tap when you do it</h3>
-            <div className="flex flex-wrap gap-3 justify-center">
-              {quickDeeds.map(deed => (
-                <button
-                  key={deed.id}
-                  onClick={() => handleQuickDeedTap(deed)}
-                  disabled={quickDeedTapping === deed.id}
-                  className="flex flex-col items-center gap-1.5 bg-white/10 hover:bg-emerald-500/20 active:scale-95 border border-white/20 hover:border-emerald-400/50 rounded-2xl px-5 py-3 transition-all duration-150 disabled:opacity-50"
-                >
-                  <span className="text-2xl">{deed.emoji}</span>
-                  <span className="text-xs font-semibold text-white/80">{deed.label}</span>
-                  {(quickDeedCounts[deed.id] ?? 0) > 0 && (
-                    <span className="text-[10px] text-emerald-400 font-bold">+{quickDeedCounts[deed.id]} today</span>
-                  )}
-                </button>
-              ))}
-            </div>
+        {/* Daily Streak */}
+        {user && streak && (
+          <div className="mb-4">
+            <StreakDisplay streak={streak} />
           </div>
         )}
 
@@ -974,6 +1012,12 @@ const GameBoard: React.FC = () => {
         <EditProfileModal
           onClose={() => setShowEditProfile(false)}
           onDeleted={() => { logout(); navigate('/'); }}
+        />
+      )}
+      {streakMilestones.length > 0 && (
+        <StreakMilestoneModal
+          milestones={streakMilestones}
+          onClose={() => setStreakMilestones([])}
         />
       )}
       <Footer tone="dark" />
