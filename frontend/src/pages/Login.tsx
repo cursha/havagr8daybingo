@@ -14,32 +14,39 @@ const HERO_BG = '#4FB3E8';
 const Login: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const { login } = useAuth();
+  const { login, loginAnonymous } = useAuth();
+  const [mode, setMode] = useState<'standard' | 'anonymous'>('standard');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [needVerify, setNeedVerify] = useState(false);
 
+  const isAnon = mode === 'anonymous';
   const redirectTo = (location.state as { from?: string } | null)?.from || '/game';
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const mail = email.trim();
-    if (!mail || !password) {
-      toast.error('Please enter both email and password.');
+    const ident = email.trim();
+    if (!ident || !password) {
+      toast.error(isAnon ? 'Please enter both nickname and password.' : 'Please enter both email and password.');
       return;
     }
     setSubmitting(true);
     setLoginError(null);
     setNeedVerify(false);
     try {
-      const { first_name } = await login({ email: mail, password });
-      toast.success(first_name ? `Welcome back, ${first_name}!` : 'Welcome back!');
+      if (isAnon) {
+        await loginAnonymous({ nickname: ident, password });
+        toast.success('Welcome back!');
+      } else {
+        const { first_name } = await login({ email: ident, password });
+        toast.success(first_name ? `Welcome back, ${first_name}!` : 'Welcome back!');
+      }
       navigate(redirectTo, { replace: true });
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Login failed.';
-      const isVerify = msg.toLowerCase().includes('verify');
+      const isVerify = !isAnon && msg.toLowerCase().includes('verify');
       setNeedVerify(isVerify);
       setLoginError(msg);
       toast.error(msg);
@@ -70,6 +77,23 @@ const Login: React.FC = () => {
           </p>
         </CardHeader>
         <CardContent>
+          {/* Standard vs Anonymous selector (Issue #17) */}
+          <div className="grid grid-cols-2 gap-2 mb-4 p-1 bg-slate-100 rounded-lg">
+            <button
+              type="button"
+              onClick={() => { setMode('standard'); setLoginError(null); }}
+              className={`text-sm font-semibold py-2 rounded-md transition-colors ${!isAnon ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => { setMode('anonymous'); setLoginError(null); }}
+              className={`text-sm font-semibold py-2 rounded-md transition-colors ${isAnon ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
+            >
+              Anonymous
+            </button>
+          </div>
           {loginError && (
             <div
               className={`mb-4 rounded-lg border p-3 text-sm ${
@@ -97,14 +121,14 @@ const Login: React.FC = () => {
           )}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{isAnon ? 'Nickname' : 'Email'}</Label>
               <Input
                 id="email"
-                type="email"
+                type={isAnon ? 'text' : 'email'}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
+                placeholder={isAnon ? 'e.g. HappyMoose27' : 'you@example.com'}
+                autoComplete={isAnon ? 'username' : 'email'}
                 required
               />
             </div>
@@ -134,9 +158,13 @@ const Login: React.FC = () => {
               )}
             </Button>
             <div className="flex items-center justify-between pt-2">
-              <Link to="/forgot-password" className="text-sm text-slate-500 hover:text-indigo-600 underline underline-offset-2">
-                Forgot password?
-              </Link>
+              {!isAnon ? (
+                <Link to="/forgot-password" className="text-sm text-slate-500 hover:text-indigo-600 underline underline-offset-2">
+                  Forgot password?
+                </Link>
+              ) : (
+                <span className="text-xs text-slate-400">Anonymous logins can't be recovered.</span>
+              )}
               <p className="text-sm text-slate-500">
                 No account?{' '}
                 <Link to="/register" className="font-semibold text-indigo-600 hover:text-indigo-700 underline underline-offset-2">
@@ -144,12 +172,14 @@ const Login: React.FC = () => {
                 </Link>
               </p>
             </div>
-            <p className="text-center text-xs text-slate-400 pt-1">
-              Didn't get a verification email?{' '}
-              <Link to="/resend-verification" className="text-indigo-500 hover:text-indigo-700 underline underline-offset-2">
-                Resend it
-              </Link>
-            </p>
+            {!isAnon && (
+              <p className="text-center text-xs text-slate-400 pt-1">
+                Didn't get a verification email?{' '}
+                <Link to="/resend-verification" className="text-indigo-500 hover:text-indigo-700 underline underline-offset-2">
+                  Resend it
+                </Link>
+              </p>
+            )}
           </form>
         </CardContent>
       </Card>

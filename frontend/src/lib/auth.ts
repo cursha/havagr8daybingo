@@ -19,10 +19,11 @@ export interface AuthTokenResponse {
   token: string;
   token_type: string;
   user_id: string;
-  email: string;
+  email: string | null;
   username?: string | null;
   role: string;
   first_name?: string | null;
+  registration_type?: 'standard' | 'anonymous';
 }
 
 export interface RegisterInput {
@@ -33,6 +34,11 @@ export interface RegisterInput {
 
 export interface LoginInput {
   email: string;
+  password: string;
+}
+
+export interface AnonymousInput {
+  nickname: string;
   password: string;
 }
 
@@ -92,6 +98,27 @@ class AuthApi {
   async login(input: LoginInput): Promise<AuthTokenResponse> {
     const data = await apiClient.post<AuthTokenResponse>(
       '/auth-custom/login',
+      input,
+      { skipAuth: true }
+    );
+    setAuthToken(data.token);
+    return data;
+  }
+
+  // ── Anonymous Play (Issue #17): nickname + password, no email required ──
+  async registerAnonymous(input: AnonymousInput): Promise<AuthTokenResponse> {
+    const data = await apiClient.post<AuthTokenResponse>(
+      '/auth-custom/register-anonymous',
+      input,
+      { skipAuth: true }
+    );
+    setAuthToken(data.token);
+    return data;
+  }
+
+  async loginAnonymous(input: AnonymousInput): Promise<AuthTokenResponse> {
+    const data = await apiClient.post<AuthTokenResponse>(
+      '/auth-custom/login-anonymous',
       input,
       { skipAuth: true }
     );
