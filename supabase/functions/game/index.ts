@@ -155,6 +155,17 @@ const WIN_LABELS: Record<string, string> = {
 }
 function winLabel(cond: string): string { return WIN_LABELS[cond] ?? cond }
 
+/** Impact Board time filters: ISO start of the current month/quarter/year, or
+ *  null for "life to date" (no lower bound). UTC-based. */
+function impactPeriodStart(period: string): string | null {
+  const now = new Date()
+  const y = now.getUTCFullYear(), m = now.getUTCMonth()
+  if (period === 'month') return new Date(Date.UTC(y, m, 1)).toISOString()
+  if (period === 'quarter') return new Date(Date.UTC(y, Math.floor(m / 3) * 3, 1)).toISOString()
+  if (period === 'year') return new Date(Date.UTC(y, 0, 1)).toISOString()
+  return null // 'all' / life-to-date
+}
+
 // ── Daily Streak Tracker ─────────────────────────────────────────────────────
 interface StreakMilestoneRow { id: number; days_required: number; label: string; message: string }
 interface StreakUpdateResult {
@@ -1304,6 +1315,64 @@ Deno.serve(async (req: Request) => {
         geo_tree: geoTree,
         deed_breakdown: deedBreakdown,
         geo_drilldown_threshold: geoDrilldownThreshold,
+      })
+    }
+
+    // ── GET /impact/summary ───────────────────────────────────────────────────
+    // Impact Board (Issue #14) Phase 2: summary metrics for a time period, read
+    // from completed_deeds. period = month | quarter | year | all (life-to-date).
+    // NOTE: aggregates in-JS over the period's rows — fine at current volumes;
+    // move to a cached rollup / SQL aggregation when the table grows large.
+    if (method === 'GET' && path === '/impact/summary') {
+      const period = new URL(req.url).searchParams.get('period') ?? 'all'
+      const start = impactPeriodStart(period)
+
+      let cdQuery = supabase
+        .from('completed_deeds')
+        .select('player_id, team_id_at_completion, city, province_state, country_id')
+        .eq('is_hidden_from_impact_board', false)
+      if (start) cdQuery = cdQuery.gte('completed_at', start)
+      const { data: cd } = await cdQuery
+      const rows = cd ?? []
+
+      const deedsDelivered = rows.length
+      const activePlayers = new Set(rows.map(r => r.player_id)).size
+      const activeTeams = new Set(rows.filter(r => r.team_id_at_completion != null).map(r => r.team_id_at_completion)).size
+      const countries = new Set(rows.filter(r => r.country_id != null).map(r => r.country_id)).size
+      const provinces = new Set(rows.filter(r => r.province_state).map(r => `${r.country_id}|${r.province_state}`)).size
+      const cities = new Set(rows.filter(r => r.city).map(r => `${r.country_id}|${r.province_state}|${r.city}`)).size
+
+      // Lifetime participation (all-time, ignores the period)
+      const { data: allCd } = await supabase
+        .from('completed_deeds').select('player_id, team_id_at_completion')
+        .eq('is_hidden_from_impact_board', false)
+      const lifetimePlayers = new Set((allCd ?? []).map(r => r.player_id)).size
+      const lifetimeTeams = new Set((allCd ?? []).filter(r => r.team_id_at_completion != null).map(r => r.team_id_at_completion)).size
+
+      // Bingos + full cards. completed_deeds has no bingo/full-card event yet, so
+      // derive from player_cards (time-filtered by updated_at — approximate).
+      const { data: cards } = await supabase
+        .from('player_cards').select('completed_cells, purchased_cells, referral_cells, card_data, is_bingo, updated_at')
+      let bingos = 0, fullCards = 0
+      for (const c of (cards ?? [])) {
+        if (start && (!c.updated_at || c.updated_at < start)) continue
+        if (c.is_bingo) bingos++
+        let cells: Cell[] = []
+        try { cells = JSON.parse(c.card_data) } catch { cells = [] }
+        const covered = new Set([
+          ...parseJsonArr(c.completed_cells),
+          ...parseJsonArr(c.purchased_cells),
+          ...parseJsonArr(c.referral_cells),
+          ...freeSpaceIndices(cells),
+        ])
+        if (cells.length > 0 && covered.size >= cells.length) fullCards++
+      }
+
+      return jsonResponse({
+        period,
+        impact: { deeds_delivered: deedsDelivered, bingos_achieved: bingos, full_cards_completed: fullCards },
+        participation: { active_players: activePlayers, lifetime_players: lifetimePlayers, active_teams: activeTeams, lifetime_teams: lifetimeTeams },
+        reach: { cities, provinces, countries },
       })
     }
 

@@ -460,6 +460,20 @@ export async function getPlayerLeaderboard(): Promise<PlayerLeaderboardData> {
   return withRetry(() => apiClient.get<PlayerLeaderboardData>('/game/leaderboard/players', { skipAuth: true } as any));
 }
 
+// ── Impact Board (Issue #14) ────────────────────────────────────────────────────
+export type ImpactPeriod = 'month' | 'quarter' | 'year' | 'all';
+
+export interface ImpactSummary {
+  period: ImpactPeriod;
+  impact: { deeds_delivered: number; bingos_achieved: number; full_cards_completed: number };
+  participation: { active_players: number; lifetime_players: number; active_teams: number; lifetime_teams: number };
+  reach: { cities: number; provinces: number; countries: number };
+}
+
+export async function getImpactSummary(period: ImpactPeriod): Promise<ImpactSummary> {
+  return apiClient.get<ImpactSummary>(`/game/impact/summary?period=${period}`, { skipAuth: true } as any);
+}
+
 export async function getPublicPrize(): Promise<PrizeInfo> {
   return apiClient.get<PrizeInfo>('/game/public/prize', { skipAuth: true });
 }

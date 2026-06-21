@@ -3,16 +3,19 @@ import { useNavigate } from 'react-router-dom';
 import {
   getPlayerLeaderboard,
   getStreakLeaderboard,
+  getImpactSummary,
   PlayerLeaderboardData,
   PlayerRankEntry,
   StreakLeaderboard,
+  ImpactSummary,
+  ImpactPeriod,
   GeoCountry,
   GeoState,
 } from '@/lib/game-utils';
 import Footer from '@/components/Footer';
 import {
   ArrowLeft, MapPin, ListChecks, Trophy, ChevronRight, Loader2, Users,
-  Flame, TrendingUp, TrendingDown, UserPlus, Globe, Lock, ChevronLeft,
+  Flame, Globe, Lock, ChevronLeft, Sparkles, Award, Grid3x3, UsersRound, Building2, Map,
 } from 'lucide-react';
 
 type View = 'players' | 'streaks' | 'deeds' | 'places';
@@ -61,10 +64,26 @@ const Gauge: React.FC<{ value: number; label: string }> = ({ value, label }) => 
   );
 };
 
-const StatTile: React.FC<{ icon: React.ReactNode; value: React.ReactNode; label: string }> = ({ icon, value, label }) => (
-  <div className="bg-slate-900 border border-slate-800 rounded-lg px-3 py-2.5">
-    <div className="flex items-center gap-1.5 text-slate-400 text-[11px] uppercase tracking-wider">{icon}{label}</div>
-    <p className="text-lg font-bold text-white tabular-nums mt-0.5">{value}</p>
+const PERIODS: { key: ImpactPeriod; label: string }[] = [
+  { key: 'month', label: 'Month' },
+  { key: 'quarter', label: 'Quarter' },
+  { key: 'year', label: 'Year' },
+  { key: 'all', label: 'All Time' },
+];
+
+const ImpactCard: React.FC<{ icon: React.ReactNode; label: string; value?: number }> = ({ icon, label, value }) => (
+  <div className="bg-slate-900 border border-slate-800 rounded-xl p-3">
+    <div className="flex items-center gap-1.5 text-slate-400 text-[10px] uppercase tracking-wider">{icon}<span className="truncate">{label}</span></div>
+    <p className="text-2xl font-bold text-white tabular-nums mt-1">{value == null ? '—' : value.toLocaleString()}</p>
+  </div>
+);
+
+const ImpactGroup: React.FC<{ title: string; cols: string; cards: { icon: React.ReactNode; label: string; value?: number }[] }> = ({ title, cols, cards }) => (
+  <div>
+    <p className="text-[11px] uppercase tracking-widest text-slate-500 font-semibold mb-1.5 px-0.5">{title}</p>
+    <div className={`grid ${cols} gap-2`}>
+      {cards.map((c, i) => <ImpactCard key={i} {...c} />)}
+    </div>
   </div>
 );
 
@@ -78,6 +97,8 @@ const Leaderboard: React.FC = () => {
   const [streakMode, setStreakMode] = useState<'current' | 'longest'>('current');
   const [country, setCountry] = useState<GeoCountry | null>(null);
   const [stateNode, setStateNode] = useState<GeoState | null>(null);
+  const [period, setPeriod] = useState<ImpactPeriod>('all');
+  const [impact, setImpact] = useState<ImpactSummary | null>(null);
 
   useEffect(() => {
     Promise.allSettled([getPlayerLeaderboard(), getStreakLeaderboard()])
@@ -88,6 +109,10 @@ const Leaderboard: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    getImpactSummary(period).then(setImpact).catch(() => {});
+  }, [period]);
+
   const players = data?.all_time ?? [];
   const deeds = (data?.deed_breakdown && data.deed_breakdown.length ? data.deed_breakdown : data?.top_deeds) ?? [];
   const geo = data?.geo_tree ?? [];
@@ -95,9 +120,7 @@ const Leaderboard: React.FC = () => {
 
   const totalDeeds = players.reduce((s, p) => s + p.deeds, 0);
   const totalPlayers = players.length;
-  const activeThisWeek = data?.this_week?.length ?? 0;
-  const participation = totalPlayers > 0 ? Math.round((activeThisWeek / totalPlayers) * 100) : 0;
-  const weekTrend = data?.week_trend ?? 0;
+  const thisWeekDeeds = data?.this_week_deeds ?? 0;
   const maxDeeds = players[0]?.deeds || 1;
   const maxDeedCount = deeds[0]?.count || 1;
 
@@ -107,7 +130,7 @@ const Leaderboard: React.FC = () => {
     { key: 'players', label: 'Players', icon: <Trophy className="w-4 h-4" /> },
     { key: 'streaks', label: 'Streaks', icon: <Flame className="w-4 h-4" /> },
     { key: 'deeds', label: 'Deeds', icon: <ListChecks className="w-4 h-4" /> },
-    { key: 'places', label: 'Places', icon: <MapPin className="w-4 h-4" /> },
+    { key: 'places', label: 'Countries', icon: <MapPin className="w-4 h-4" /> },
   ];
 
   const streakList = (streakMode === 'current'
@@ -130,26 +153,52 @@ const Leaderboard: React.FC = () => {
       </header>
 
       <div className="max-w-3xl mx-auto w-full px-4 py-5 flex-1 space-y-4">
-        {/* Hero: big number + gauge (BI-dashboard layout) */}
+        {/* Hero: community total + this-week count (BI-dashboard layout) */}
         <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 flex items-center gap-5">
           <div className="flex-1 min-w-0">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Community Kindness</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-400">Community Gr8Day Deeds</p>
             <p className="text-4xl sm:text-5xl font-bold text-white mt-1 leading-none tabular-nums">{totalDeeds.toLocaleString()}</p>
             <p className="text-sm text-slate-400 mt-1.5">
-              acts of kindness · {totalPlayers.toLocaleString()} {totalPlayers === 1 ? 'player' : 'players'} · {(data?.unique_countries ?? 0)} {data?.unique_countries === 1 ? 'country' : 'countries'}
+              by {totalPlayers.toLocaleString()} {totalPlayers === 1 ? 'player' : 'players'} · {(data?.unique_countries ?? 0)} {data?.unique_countries === 1 ? 'country' : 'countries'}
             </p>
           </div>
-          <Gauge value={participation} label="Kind this week" />
+          <div className="text-right shrink-0">
+            <p className="text-3xl sm:text-4xl font-bold text-blue-400 tabular-nums leading-none">{thisWeekDeeds.toLocaleString()}</p>
+            <p className="text-[11px] uppercase tracking-wider text-slate-400 mt-1.5 leading-tight">Gr8Day Deeds<br />This Week</p>
+          </div>
         </div>
 
-        {/* Stat tiles */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          <StatTile icon={<Users className="w-3.5 h-3.5 text-slate-400" />} value={totalPlayers.toLocaleString()} label="players" />
-          <StatTile
-            icon={weekTrend >= 0 ? <TrendingUp className="w-3.5 h-3.5 text-emerald-400" /> : <TrendingDown className="w-3.5 h-3.5 text-rose-400" />}
-            value={`${weekTrend >= 0 ? '+' : ''}${weekTrend.toLocaleString()}`} label="vs last week" />
-          <StatTile icon={<UserPlus className="w-3.5 h-3.5 text-sky-400" />} value={(data?.new_players_this_week ?? 0).toLocaleString()} label="new this week" />
-          <StatTile icon={<Globe className="w-3.5 h-3.5 text-violet-400" />} value={(data?.unique_countries ?? 0).toLocaleString()} label="countries" />
+        {/* Impact summary with time filter (Issue #14) */}
+        <div className="space-y-3">
+          <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1">
+            {PERIODS.map((p) => (
+              <button key={p.key} onClick={() => setPeriod(p.key)}
+                className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                  period === p.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                }`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+
+          <ImpactGroup title="Impact" cols="grid-cols-3" cards={[
+            { icon: <Sparkles className="w-3.5 h-3.5 text-amber-400" />, label: 'Gr8Day Deeds', value: impact?.impact.deeds_delivered },
+            { icon: <Award className="w-3.5 h-3.5 text-emerald-400" />, label: 'Bingos', value: impact?.impact.bingos_achieved },
+            { icon: <Grid3x3 className="w-3.5 h-3.5 text-sky-400" />, label: 'Full Cards', value: impact?.impact.full_cards_completed },
+          ]} />
+
+          <ImpactGroup title="Participation" cols="grid-cols-2 sm:grid-cols-4" cards={[
+            { icon: <Users className="w-3.5 h-3.5 text-blue-400" />, label: 'Active Players', value: impact?.participation.active_players },
+            { icon: <UsersRound className="w-3.5 h-3.5 text-blue-400" />, label: 'Active Teams', value: impact?.participation.active_teams },
+            { icon: <Users className="w-3.5 h-3.5 text-slate-400" />, label: 'Lifetime Players', value: impact?.participation.lifetime_players },
+            { icon: <UsersRound className="w-3.5 h-3.5 text-slate-400" />, label: 'Lifetime Teams', value: impact?.participation.lifetime_teams },
+          ]} />
+
+          <ImpactGroup title="Reach" cols="grid-cols-3" cards={[
+            { icon: <Building2 className="w-3.5 h-3.5 text-violet-400" />, label: 'Cities', value: impact?.reach.cities },
+            { icon: <Map className="w-3.5 h-3.5 text-violet-400" />, label: 'Provinces', value: impact?.reach.provinces },
+            { icon: <Globe className="w-3.5 h-3.5 text-violet-400" />, label: 'Countries', value: impact?.reach.countries },
+          ]} />
         </div>
 
         {/* Tabs */}
@@ -174,7 +223,7 @@ const Leaderboard: React.FC = () => {
             {/* ── PLAYERS ─────────────────────────────────────────── */}
             {view === 'players' && (
               <Panel>
-                <TableHead cols={['#', 'Player', 'Kindness']} />
+                <TableHead cols={['#', 'Player', 'Gr8Day Deeds']} />
                 {players.length === 0 ? (
                   <Empty>No players ranked yet.</Empty>
                 ) : players.map((p, i) => (
