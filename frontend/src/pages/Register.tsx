@@ -13,7 +13,8 @@ const HERO_BG = '#4FB3E8';
 
 const Register: React.FC = () => {
   const navigate = useNavigate();
-  const { register } = useAuth();
+  const { register, registerAnonymous } = useAuth();
+  const [mode, setMode] = useState<'standard' | 'anonymous'>('standard');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -21,21 +22,26 @@ const Register: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [registered, setRegistered] = useState(false);
 
+  const isAnon = mode === 'anonymous';
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const uname = username.trim();
     const mail = email.trim();
     if (uname.length < 3) {
-      toast.error('Username must be at least 3 characters.');
+      toast.error(isAnon ? 'Nickname must be at least 3 characters.' : 'Username must be at least 3 characters.');
       return;
     }
-    const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRe.test(mail)) {
-      toast.error('Please enter a valid email address.');
-      return;
+    if (!isAnon) {
+      const emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRe.test(mail)) {
+        toast.error('Please enter a valid email address.');
+        return;
+      }
     }
-    if (password.length < 8) {
-      toast.error('Password must be at least 8 characters.');
+    const minLen = isAnon ? 6 : 8;
+    if (password.length < minLen) {
+      toast.error(`Password must be at least ${minLen} characters.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -45,8 +51,15 @@ const Register: React.FC = () => {
 
     setSubmitting(true);
     try {
-      await register({ username: uname, email: mail, password });
-      setRegistered(true);
+      if (isAnon) {
+        // Anonymous accounts are usable immediately (no email to verify), so
+        // we drop the player straight into the game.
+        await registerAnonymous({ nickname: uname, password });
+        navigate('/game');
+      } else {
+        await register({ username: uname, email: mail, password });
+        setRegistered(true);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Registration failed.';
       toast.error(msg);
@@ -106,30 +119,58 @@ const Register: React.FC = () => {
           </p>
         </CardHeader>
         <CardContent>
+          {/* Standard vs Anonymous selector (Issue #17) */}
+          <div className="grid grid-cols-2 gap-2 mb-4 p-1 bg-slate-100 rounded-lg">
+            <button
+              type="button"
+              onClick={() => setMode('standard')}
+              className={`text-sm font-semibold py-2 rounded-md transition-colors ${!isAnon ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
+            >
+              Standard
+            </button>
+            <button
+              type="button"
+              onClick={() => setMode('anonymous')}
+              className={`text-sm font-semibold py-2 rounded-md transition-colors ${isAnon ? 'bg-white shadow text-slate-900' : 'text-slate-500'}`}
+            >
+              Anonymous
+            </button>
+          </div>
+
+          {isAnon && (
+            <p className="text-xs text-slate-500 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 mb-4">
+              Play with just a nickname and password. No name or email needed.
+              Anonymous players are not eligible for prizes (we have no way to
+              contact you), and a forgotten password cannot be recovered automatically.
+            </p>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="username">Username</Label>
+              <Label htmlFor="username">{isAnon ? 'Nickname' : 'Username'}</Label>
               <Input
                 id="username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                placeholder="Choose a username"
+                placeholder={isAnon ? 'e.g. HappyMoose27' : 'Choose a username'}
                 autoComplete="username"
                 required
               />
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="you@example.com"
-                autoComplete="email"
-                required
-              />
-            </div>
+            {!isAnon && (
+              <div className="space-y-1.5">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="you@example.com"
+                  autoComplete="email"
+                  required
+                />
+              </div>
+            )}
             <div className="space-y-1.5">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -137,7 +178,7 @@ const Register: React.FC = () => {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder="At least 8 characters"
+                placeholder={isAnon ? 'At least 6 characters' : 'At least 8 characters'}
                 autoComplete="new-password"
                 required
               />

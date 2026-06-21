@@ -143,6 +143,111 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // POST /register-anonymous (Issue #17) — nickname + password only, no email.
+    if (method === 'POST' && path === '/register-anonymous') {
+      const body = await req.json()
+      const nickname = String(body.nickname ?? body.username ?? '').trim()
+      const password = String(body.password ?? '')
+
+      if (!nickname || !password) {
+        return errorResponse('A nickname and password are required.', 400)
+      }
+      if (nickname.length < 3 || nickname.length > 30) {
+        return errorResponse('Nickname must be between 3 and 30 characters.', 400)
+      }
+      if (password.length < 6) {
+        return errorResponse('Password must be at least 6 characters.', 400)
+      }
+
+      const { data: taken } = await supabase
+        .from('users')
+        .select('id')
+        .eq('username', nickname)
+        .maybeSingle()
+      if (taken) return errorResponse('That nickname is already taken. Please choose another.', 409)
+
+      const passwordHash = await bcrypt.hash(password, 10)
+      const userId = crypto.randomUUID()
+
+      const { data: user, error } = await supabase
+        .from('users')
+        .insert({
+          id: userId,
+          email: null,
+          username: nickname,
+          password_hash: passwordHash,
+          name: nickname,
+          role: 'user',
+          registration_type: 'anonymous',
+          // No email to verify, so the account is usable immediately and the
+          // profile is treated as complete (we never nag anonymous players).
+          email_verified: true,
+          profile_completed: true,
+          last_login: new Date().toISOString(),
+        })
+        .select()
+        .single()
+      if (error) throw error
+
+      const token = await createAccessToken({
+        sub: user.id,
+        email: '',
+        role: user.role,
+        name: user.name,
+        last_login: user.last_login,
+      })
+
+      return jsonResponse({
+        token,
+        user_id: user.id,
+        email: null,
+        username: user.username,
+        role: user.role,
+        registration_type: 'anonymous',
+      })
+    }
+
+    // POST /login-anonymous (Issue #17) — nickname + password, no email gate.
+    if (method === 'POST' && path === '/login-anonymous') {
+      const body = await req.json()
+      const nickname = String(body.nickname ?? body.username ?? '').trim()
+      const password = String(body.password ?? '')
+
+      const { data: user } = await supabase
+        .from('users')
+        .select('*')
+        .eq('username', nickname)
+        .eq('registration_type', 'anonymous')
+        .maybeSingle()
+
+      if (!user || !user.password_hash) {
+        return errorResponse('Invalid nickname or password.', 401)
+      }
+      const valid = await bcrypt.compare(password, user.password_hash)
+      if (!valid) return errorResponse('Invalid nickname or password.', 401)
+
+      const now = new Date().toISOString()
+      await supabase.from('users').update({ last_login: now }).eq('id', user.id)
+
+      const token = await createAccessToken({
+        sub: user.id,
+        email: '',
+        role: user.role,
+        name: user.name,
+        last_login: now,
+      })
+
+      return jsonResponse({
+        token,
+        user_id: user.id,
+        email: null,
+        username: user.username,
+        role: user.role,
+        registration_type: 'anonymous',
+        first_name: null,
+      })
+    }
+
     // POST /verify-email
     if (method === 'POST' && path === '/verify-email') {
       const body = await req.json()

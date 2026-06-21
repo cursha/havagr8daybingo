@@ -10,6 +10,7 @@ import {
   AuthUser,
   LoginInput,
   RegisterInput,
+  AnonymousInput,
   authApi,
 } from '../lib/auth';
 
@@ -19,6 +20,8 @@ interface AuthContextType {
   error: string | null;
   login: (input: LoginInput) => Promise<{ first_name?: string | null }>;
   register: (input: RegisterInput) => Promise<void>;
+  loginAnonymous: (input: AnonymousInput) => Promise<void>;
+  registerAnonymous: (input: AnonymousInput) => Promise<void>;
   logout: () => Promise<void>;
   refetch: () => Promise<void>;
   isAdmin: boolean;
@@ -76,6 +79,18 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     await checkAuthStatus();
   }, [checkAuthStatus]);
 
+  const loginAnonymous = useCallback(async (input: AnonymousInput) => {
+    setError(null);
+    await authApi.loginAnonymous(input);
+    await checkAuthStatus();
+  }, [checkAuthStatus]);
+
+  const registerAnonymous = useCallback(async (input: AnonymousInput) => {
+    setError(null);
+    await authApi.registerAnonymous(input);
+    await checkAuthStatus();
+  }, [checkAuthStatus]);
+
   const logout = useCallback(async () => {
     setError(null);
     await authApi.logout();
@@ -92,6 +107,8 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
     error,
     login,
     register,
+    loginAnonymous,
+    registerAnonymous,
     logout,
     refetch: checkAuthStatus,
     isAdmin: user?.role === 'admin',
