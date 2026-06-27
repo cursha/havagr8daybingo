@@ -2,6 +2,10 @@ import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { getAuthUser, requireAuth, requireAdmin } from '../_shared/auth.ts'
 import { getSupabase, getSubPath, matchPath } from '../_shared/db.ts'
 import { sendEmail, passwordResetEmail, referralInviteEmail, bingoWinEmail, prizeClaimConfirmationEmail, gameAnnouncementEmail } from '../_shared/email.ts'
+import {
+  getDrawSettings, awardDeedEntry, awardBingoBonus,
+  reverseDeedEntry, reverseBingoBonus, manualAdjust, runWeeklyDraw,
+} from '../_shared/draw.ts'
 import bcrypt from 'npm:bcryptjs@2'
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -236,7 +240,7 @@ async function recordCompletedDeed(
     cellIndex?: number | null
     category?: string | null
   }
-): Promise<void> {
+): Promise<number | null> {
   try {
     const { data: u } = await supabase
       .from('users').select('city, province_state, country_id').eq('id', opts.playerId).maybeSingle()
@@ -252,7 +256,7 @@ async function recordCompletedDeed(
       const { data: d } = await supabase.from('good_deeds').select('category').eq('id', opts.deedId).maybeSingle()
       category = d?.category ?? null
     }
-    await supabase.from('completed_deeds').insert({
+    const { data: inserted } = await supabase.from('completed_deeds').insert({
       player_id: opts.playerId,
       team_id_at_completion: tm?.team_id ?? null,
       source_type: opts.sourceType,
@@ -265,9 +269,11 @@ async function recordCompletedDeed(
       province_state: u?.province_state ?? null,
       country_id: u?.country_id ?? null,
       country_name: countryName,
-    })
+    }).select('id').single()
+    return inserted?.id ?? null
   } catch (_e) {
     // swallow — impact recording is never allowed to break gameplay
+    return null
   }
 }
 
@@ -783,7 +789,7 @@ Deno.serve(async (req: Request) => {
       })
 
       // Impact Board: record the completed deed (best-effort, never blocks the mark)
-      await recordCompletedDeed(supabase, {
+      const completedDeedId = await recordCompletedDeed(supabase, {
         playerId: user.sub,
         sourceType: 'bingo_card',
         deedId: (cell as { deed_id?: number | null }).deed_id ?? null,
@@ -792,12 +798,20 @@ Deno.serve(async (req: Request) => {
         category: (cell as { category?: string | null }).category ?? null,
       })
 
-      // First time the card reaches Bingo: enter draw + congratulate by email (best-effort).
+      // Weekly Draw: award a draw entry for this completed deed (idempotent, gated).
+      const drawSettings = await getDrawSettings(supabase)
+      if (completedDeedId != null) {
+        await awardDeedEntry(supabase, {
+          completedDeedId, playerId: user.sub, weekYear: card.week_year,
+          sourceType: 'bingo_card', settings: drawSettings,
+        })
+      }
+
+      // First time the card reaches Bingo: award bingo bonus + congratulate by email.
       if (isBingo && !card.is_bingo) {
-        await supabase.from('draw_entries').upsert(
-          { user_id: user.sub, week_year: card.week_year },
-          { onConflict: 'user_id,week_year', ignoreDuplicates: true }
-        )
+        await awardBingoBonus(supabase, {
+          playerId: user.sub, cardId: card_id, weekYear: card.week_year, settings: drawSettings,
+        })
         if (user.email) {
           const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
           await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
@@ -897,12 +911,13 @@ Deno.serve(async (req: Request) => {
         updated_at: new Date().toISOString(),
       }).eq('id', card_id)
 
-      // First time the card reaches Bingo: enter draw + congratulate by email (best-effort).
+      // First time the card reaches Bingo: award bingo bonus + congratulate by email.
+      // Note: a purchased square is not a completed deed, so it earns NO deed entry,
+      // but it CAN complete a bingo, which still earns the configured bonus.
       if (isBingo && !card.is_bingo) {
-        await supabase.from('draw_entries').upsert(
-          { user_id: user.sub, week_year: card.week_year },
-          { onConflict: 'user_id,week_year', ignoreDuplicates: true }
-        )
+        await awardBingoBonus(supabase, {
+          playerId: user.sub, cardId: card_id, weekYear: card.week_year,
+        })
         if (user.email) {
           const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
           await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
@@ -1074,11 +1089,19 @@ Deno.serve(async (req: Request) => {
       if (error) throw error
 
       // Impact Board: a quick action is a completed deed (best-effort, non-blocking)
-      await recordCompletedDeed(supabase, {
+      const quickDeedId = await recordCompletedDeed(supabase, {
         playerId: user.sub,
         sourceType: 'quick_action',
         quickDeedId: deedId,
       })
+
+      // Weekly Draw: award a draw entry for this quick-tap deed (idempotent, gated).
+      if (quickDeedId != null) {
+        await awardDeedEntry(supabase, {
+          completedDeedId: quickDeedId, playerId: user.sub, weekYear: getCurrentWeekYear(),
+          sourceType: 'quick_action',
+        })
+      }
 
       // Update daily streak
       const streakResult = await updatePlayerStreak(supabase, user.sub)
@@ -2625,6 +2648,132 @@ Deno.serve(async (req: Request) => {
       })
     }
 
+    // ── GET /admin/draw-leaderboard ───────────────────────────────────────────
+    // Per-player draw-entry data for the admin leaderboard (individual only).
+    if (method === 'GET' && path === '/admin/draw-leaderboard') {
+      requireAdmin(authUser)
+      const wy = getCurrentWeekYear()
+      const ds = await getDrawSettings(supabase)
+
+      const { data: balances } = await supabase
+        .from('player_draw_balances')
+        .select('player_id, active_entries, lifetime_entries, this_week_entries, this_week_year, last_draw_win_date, last_participation_date')
+      const { data: ppl } = await supabase
+        .from('users').select('id, first_name, last_name, username, player_number')
+
+      // Who participated (completed a deed) in the current week → eligibility flag.
+      const wkStart = getWeekStart(wy)
+      const wkEnd = new Date(wkStart); wkEnd.setDate(wkStart.getDate() + 7)
+      const { data: weekDeeds } = await supabase
+        .from('completed_deeds').select('player_id')
+        .gte('completed_at', wkStart.toISOString()).lt('completed_at', wkEnd.toISOString())
+      const participated = new Set((weekDeeds ?? []).map((d: any) => d.player_id))
+
+      const nameById: Record<string, any> = {}
+      for (const u of (ppl ?? [])) nameById[u.id] = u
+
+      const rows = (balances ?? []).map((b: any) => {
+        const u = nameById[b.player_id] ?? {}
+        const thisWeek = b.this_week_year === wy ? Number(b.this_week_entries) : 0
+        const active = Number(b.active_entries)
+        const eligible = active > 0 && (!ds.requireParticipation || participated.has(b.player_id))
+        return {
+          user_id: b.player_id,
+          player_name: [u.first_name, u.last_name].filter(Boolean).join(' ') || u.username || `GR8-${u.player_number}`,
+          this_week_entries: thisWeek,
+          active_entries: active,
+          lifetime_entries: Number(b.lifetime_entries),
+          last_draw_win: b.last_draw_win_date,
+          last_participation_date: b.last_participation_date,
+          current_week_eligible: eligible,
+        }
+      }).sort((a: any, b: any) => b.active_entries - a.active_entries)
+
+      return jsonResponse({ week_year: wy, require_participation: ds.requireParticipation, players: rows })
+    }
+
+    // ── POST /admin/reverse-deed ──────────────────────────────────────────────
+    // Reverse a completed deed: remove its draw entry and, if reversing it also
+    // un-completes the card's bingo, remove the related bingo bonus too.
+    if (method === 'POST' && path === '/admin/reverse-deed') {
+      const admin = requireAdmin(authUser)
+      const body = await req.json()
+      const completedDeedId = Number(body.completed_deed_id)
+      const reason: string = (body.reason ? String(body.reason) : 'Deed reversed by admin').slice(0, 500)
+      if (!Number.isFinite(completedDeedId)) return errorResponse('completed_deed_id required', 400)
+
+      const { data: deed } = await supabase
+        .from('completed_deeds').select('*').eq('id', completedDeedId).maybeSingle()
+      if (!deed) return errorResponse('Completed deed not found', 404)
+
+      // Remove the deed's draw entry (idempotent).
+      const deedReversed = await reverseDeedEntry(supabase, completedDeedId, admin.sub, reason)
+
+      // If this deed sat on a bingo card, recompute whether the card still bingos
+      // once this cell is removed. If it no longer bingos, reverse the bonus.
+      let bingoReversed = false
+      if (deed.source_type === 'bingo_card' && deed.card_id != null) {
+        const { data: card } = await supabase
+          .from('player_cards').select('*').eq('id', deed.card_id).maybeSingle()
+        if (card) {
+          const cells: Cell[] = JSON.parse(card.card_data)
+          const completed = parseJsonArr(card.completed_cells).filter((i: number) => i !== deed.cell_index)
+          const purchased = parseJsonArr(card.purchased_cells)
+          const referral = parseJsonArr(card.referral_cells)
+          const allCompleted = [...new Set([...completed, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
+          const stillBingo = checkBingo(allCompleted, card.win_condition)
+
+          // Reflect the removal on the card itself.
+          await supabase.from('player_cards').update({
+            completed_cells: JSON.stringify(completed),
+            is_bingo: stillBingo,
+            updated_at: new Date().toISOString(),
+          }).eq('id', card.id)
+
+          if (!stillBingo && card.is_bingo) {
+            bingoReversed = await reverseBingoBonus(supabase, card.id, card.week_year, admin.sub, reason)
+          }
+        }
+      }
+
+      // Hide the deed from the Impact Board so rollups stay correct.
+      await supabase.from('completed_deeds')
+        .update({ is_hidden_from_impact_board: true }).eq('id', completedDeedId)
+
+      return jsonResponse({ success: true, deed_entry_reversed: deedReversed, bingo_bonus_reversed: bingoReversed })
+    }
+
+    // ── POST /admin/draw-adjust ───────────────────────────────────────────────
+    // Manual admin adjustment of a player's active draw entries (+/-).
+    if (method === 'POST' && path === '/admin/draw-adjust') {
+      const admin = requireAdmin(authUser)
+      const body = await req.json()
+      const playerId = String(body.player_id ?? '')
+      const amount = Number(body.amount)
+      const reason: string = (body.reason ? String(body.reason) : 'Manual admin adjustment').slice(0, 500)
+      if (!playerId || !Number.isFinite(amount)) return errorResponse('player_id and numeric amount required', 400)
+      const ok = await manualAdjust(supabase, playerId, admin.sub, Math.trunc(amount), reason)
+      return jsonResponse({ success: ok })
+    }
+
+    // ── POST /admin/run-draw ──────────────────────────────────────────────────
+    // Manually trigger the weekly draw for a given (or the previous) week.
+    if (method === 'POST' && path === '/admin/run-draw') {
+      requireAdmin(authUser)
+      const body = await req.json().catch(() => ({}))
+      let weekYear: string = body.week_year ? String(body.week_year) : ''
+      if (!weekYear) {
+        // Default to the week that just ended.
+        const d = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+        const t = new Date(d); t.setDate(d.getDate() + (4 - (d.getDay() || 7)))
+        const y = t.getFullYear(); const j = new Date(y, 0, 1)
+        const w = Math.ceil(((t.getTime() - j.getTime()) / 86_400_000 + 1) / 7)
+        weekYear = `${y}-W${String(w).padStart(2, '0')}`
+      }
+      const result = await runWeeklyDraw(supabase, weekYear)
+      return jsonResponse({ success: true, draw: result })
+    }
+
     // ── GET /my-team ─────────────────────────────────────────────────────────
     if (method === 'GET' && path === '/my-team') {
       const user = requireAuth(authUser)
@@ -3198,12 +3347,30 @@ Deno.serve(async (req: Request) => {
             updated_at: new Date().toISOString(),
           }).eq('id', card_id)
 
-          // First time reaching bingo via dare: enter draw + send email (best-effort)
+          // The dare auto-mark IS a completed deed. Record it (this previously
+          // never happened, so dare-marked deeds were invisible to the Impact
+          // Board and the draw) and award its draw entry.
+          const dareDeedId = await recordCompletedDeed(supabase, {
+            playerId: user.sub,
+            sourceType: 'bingo_card',
+            deedId: (markCell as { deed_id?: number | null }).deed_id ?? null,
+            cardId: card_id,
+            cellIndex: markCell.index,
+            category: (markCell as { category?: string | null }).category ?? null,
+          })
+          const dareSettings = await getDrawSettings(supabase)
+          if (dareDeedId != null) {
+            await awardDeedEntry(supabase, {
+              completedDeedId: dareDeedId, playerId: user.sub, weekYear: card.week_year,
+              sourceType: 'bingo_card', settings: dareSettings,
+            })
+          }
+
+          // First time reaching bingo via dare: award bingo bonus + send email
           if (isBingo2 && !card.is_bingo) {
-            await supabase.from('draw_entries').upsert(
-              { user_id: user.sub, week_year: card.week_year },
-              { onConflict: 'user_id,week_year', ignoreDuplicates: true }
-            )
+            await awardBingoBonus(supabase, {
+              playerId: user.sub, cardId: card_id, weekYear: card.week_year, settings: dareSettings,
+            })
             if (user.email) {
               const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
               await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })

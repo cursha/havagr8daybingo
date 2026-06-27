@@ -1,6 +1,7 @@
 import { handleCors, jsonResponse, errorResponse } from '../_shared/cors.ts'
 import { getSupabase } from '../_shared/db.ts'
 import { sendEmail } from '../_shared/email.ts'
+import { runWeeklyDraw } from '../_shared/draw.ts'
 
 const SITE_URL = 'https://havagr8day.com'
 
@@ -81,7 +82,13 @@ function getPreviousWeekYear(): string {
   return `${lastWeek.getFullYear()}-W${String(week).padStart(2, '0')}`
 }
 
-async function runWeeklyDraw(supabase: ReturnType<typeof import('../_shared/db.ts').getSupabase>): Promise<{
+// Run the weekly draw for the week that just ended, then shape the result for
+// the notification emails below. The heavy lifting (eligibility, weighting,
+// winner reset, audit, inactivity expiry) lives in _shared/draw.ts so the same
+// logic is shared with the admin "run draw" endpoint.
+async function runWeeklyDrawForReset(
+  supabase: ReturnType<typeof import('../_shared/db.ts').getSupabase>,
+): Promise<{
   winner_id: string | null
   winner_name: string | null
   winner_email: string | null
@@ -90,83 +97,14 @@ async function runWeeklyDraw(supabase: ReturnType<typeof import('../_shared/db.t
   already_ran: boolean
 }> {
   const weekYear = getPreviousWeekYear()
-
-  // Idempotent: don't run draw twice for same week
-  const { data: existing } = await supabase
-    .from('draw_winners').select('id, user_id').eq('week_year', weekYear).maybeSingle()
-  if (existing) {
-    return { winner_id: existing.user_id, winner_name: null, winner_email: null, entries: 0, week_year: weekYear, already_ran: true }
-  }
-
-  // Fetch all draw entries for this week with player info
-  const { data: entries } = await supabase
-    .from('draw_entries')
-    .select('user_id, users!inner(email, first_name, name, username)')
-    .eq('week_year', weekYear)
-
-  if (!entries || entries.length === 0) {
-    return { winner_id: null, winner_name: null, winner_email: null, entries: 0, week_year: weekYear, already_ran: false }
-  }
-
-  // Load recent winner weight from config (default 0.05 = 5% odds)
-  const { data: weightConfig } = await supabase
-    .from('game_configs').select('value').eq('key', 'recent_winner_weight').maybeSingle()
-  const recentWinnerWeight = weightConfig ? parseFloat(weightConfig.value) : 0.05
-
-  const { data: monthsConfig } = await supabase
-    .from('game_configs').select('value').eq('key', 'recent_winner_months').maybeSingle()
-  const recentWinnerMonths = monthsConfig ? parseInt(monthsConfig.value) : 4
-
-  // Fetch recent winners (last N months) to apply reduced odds
-  const cutoff = new Date()
-  cutoff.setMonth(cutoff.getMonth() - recentWinnerMonths)
-  const { data: recentWinners } = await supabase
-    .from('draw_winners')
-    .select('user_id')
-    .gte('selected_at', cutoff.toISOString())
-  const recentWinnerIds = new Set((recentWinners ?? []).map((w: any) => w.user_id))
-
-  // Build weighted pool
-  const pool: Array<{ user_id: string; weight: number; user: any }> = entries.map((e: any) => ({
-    user_id: e.user_id,
-    weight: recentWinnerIds.has(e.user_id) ? recentWinnerWeight : 1.0,
-    user: e.users,
-  }))
-
-  const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0)
-
-  // Cryptographically random weighted selection
-  const randBuf = new Uint32Array(1)
-  crypto.getRandomValues(randBuf)
-  let rand = (randBuf[0] / 4_294_967_296) * totalWeight
-
-  let winner = pool[pool.length - 1]
-  for (const entry of pool) {
-    rand -= entry.weight
-    if (rand <= 0) {
-      winner = entry
-      break
-    }
-  }
-
-  const winnerOddsWeight = recentWinnerIds.has(winner.user_id) ? recentWinnerWeight : 1.0
-
-  // Record the winner
-  await supabase.from('draw_winners').insert({
-    user_id: winner.user_id,
-    week_year: weekYear,
-    odds_weight: winnerOddsWeight,
-  })
-
-  const winnerName = winner.user?.first_name ?? winner.user?.name ?? winner.user?.username ?? null
-
+  const r = await runWeeklyDraw(supabase, weekYear)
   return {
-    winner_id: winner.user_id,
-    winner_name: winnerName,
-    winner_email: winner.user?.email ?? null,
-    entries: entries.length,
-    week_year: weekYear,
-    already_ran: false,
+    winner_id: r.winner_id,
+    winner_name: r.winner_name,
+    winner_email: r.winner_email,
+    entries: r.pool_entries,
+    week_year: r.week_year,
+    already_ran: r.already_ran,
   }
 }
 
@@ -192,7 +130,7 @@ Deno.serve(async (req: Request) => {
 
   try {
     // ── Run weekly draw ───────────────────────────────────────────────────────
-    const draw = await runWeeklyDraw(supabase)
+    const draw = await runWeeklyDrawForReset(supabase)
 
     // Notify draw winner by email (best-effort)
     if (draw.winner_email && !draw.already_ran) {
