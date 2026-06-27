@@ -474,7 +474,7 @@ const fmtPlayed = (d?: string | null): string => {
   if (!d) return '—';
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return '—';
-  return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+return dt.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });  
 };
 
 const TableHead: React.FC<{ cols: string[] }> = ({ cols }) => (
