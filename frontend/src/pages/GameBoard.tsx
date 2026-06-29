@@ -39,10 +39,16 @@ import EditProfileModal from '@/components/EditProfileModal';
 import StreakDisplay from '@/components/StreakDisplay';
 import StreakMilestoneModal from '@/components/StreakMilestoneModal';
 import { Button } from '@/components/ui/button';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from 'sonner';
-import { Heart, Wallet, ArrowLeft, Send, RefreshCw, Trophy, Users, DollarSign, Sparkles, Target, Lightbulb, Clock, CheckCircle2, XCircle, Shield, Lock, PartyPopper, Medal, LogOut, Printer } from 'lucide-react';
+import { Heart, Wallet, ArrowLeft, Send, RefreshCw, Trophy, Users, DollarSign, Sparkles, Target, Lightbulb, Clock, CheckCircle2, XCircle, Shield, Lock, PartyPopper, Medal, LogOut, Printer, ChevronDown } from 'lucide-react';
 import Footer from '@/components/Footer';
 import { downloadBingoCardPdf, downloadTeamCardsPdf, TeamMemberCard } from '@/lib/bingo-pdf';
 
@@ -515,8 +521,8 @@ const GameBoard: React.FC = () => {
             </Button>
             <div className="flex items-center gap-2">
               <Heart className="w-5 h-5 text-pink-400 fill-pink-400" />
-              <span className="text-base font-bold text-white hidden sm:inline">Gr8Day Bingo</span>
-              <span className="text-[10px] text-slate-400 select-none ml-1">{APP_VERSION}</span>
+              <span className="text-base font-bold text-white hidden sm:inline whitespace-nowrap">Gr8Day Bingo</span>
+              <span className="text-[10px] text-white/40 select-none self-end mb-1 hidden sm:inline">{APP_VERSION}</span>
             </div>
             {playerNumber && (
               <button
@@ -570,16 +576,41 @@ const GameBoard: React.FC = () => {
               <span className="hidden sm:inline">My Wins</span>
             </Button>
             {myTeam && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => navigate('/team')}
-                className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
-                title="My Team"
-              >
-                <Users className="w-3.5 h-3.5 mr-0.5" />
-                <span className="hidden sm:inline">My Team</span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="relative border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
+                    title="Team options"
+                  >
+                    <Users className="w-3.5 h-3.5 mr-0.5" />
+                    <span className="hidden sm:inline">Team</span>
+                    <ChevronDown className="w-3 h-3 ml-0.5 hidden sm:inline" />
+                    {pendingTradeCount > 0 && (
+                      <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {pendingTradeCount}
+                      </span>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="bg-slate-900 border-white/10 text-white">
+                  <DropdownMenuItem onClick={() => navigate('/team')} className="cursor-pointer focus:bg-white/10 focus:text-white">
+                    <Users className="w-3.5 h-3.5 mr-2" /> My Team
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handlePrintTeamPdf} className="cursor-pointer focus:bg-white/10 focus:text-white">
+                    <Printer className="w-3.5 h-3.5 mr-2" /> Team Print
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => navigate('/trade')} className="cursor-pointer focus:bg-white/10 focus:text-white">
+                    <Users className="w-3.5 h-3.5 mr-2" /> Trade
+                    {pendingTradeCount > 0 && (
+                      <span className="ml-auto bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
+                        {pendingTradeCount}
+                      </span>
+                    )}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <Button
               size="sm"
@@ -592,35 +623,6 @@ const GameBoard: React.FC = () => {
               <Printer className="w-3.5 h-3.5 mr-0.5" />
               <span className="hidden sm:inline">Print Card</span>
             </Button>
-            {myTeam && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handlePrintTeamPdf}
-                className="border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
-                title="Print all team cards (2×2 grid)"
-              >
-                <Users className="w-3.5 h-3.5 mr-0.5" />
-                <span className="hidden sm:inline">Team Print</span>
-              </Button>
-            )}
-            {myTeam && (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => navigate('/trade')}
-                className="relative border-white/20 bg-white/5 text-white hover:bg-white/15 hover:text-white text-xs"
-                title="Trade a square with a teammate"
-              >
-                <Users className="w-3.5 h-3.5 mr-0.5" />
-                <span className="hidden sm:inline">Trade</span>
-                {pendingTradeCount > 0 && (
-                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[10px] font-bold rounded-full w-4 h-4 flex items-center justify-center">
-                    {pendingTradeCount}
-                  </span>
-                )}
-              </Button>
-            )}
             <Button
               size="sm"
               variant="outline"
