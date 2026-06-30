@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   getPlayerLeaderboard,
@@ -175,6 +175,7 @@ const Leaderboard: React.FC = () => {
   const [stateNode, setStateNode] = useState<GeoState | null>(null);
   const [period, setPeriod] = useState<ImpactPeriod>('all');
   const [impact, setImpact] = useState<ImpactSummary | null>(null);
+  const [playerSort, setPlayerSort] = useState<'deeds' | 'name'>('deeds');
 
   useEffect(() => {
     if (authLoading) return;
@@ -211,10 +212,20 @@ const Leaderboard: React.FC = () => {
   // Countries where deeds actually happened (excludes the "Unknown" bucket), so
   // the hero matches the Reach card instead of counting registered-but-idle countries.
   const heroCountries = geo.filter((c) => c.deeds > 0 && c.code !== 'XX' && c.name !== 'Unknown').length || (data?.unique_countries ?? 0);
-  const maxDeeds = players[0]?.deeds || 1;
+  const maxDeeds = players.reduce((m, p) => Math.max(m, p.deeds), 1);
   const maxDeedCount = deeds[0]?.count || 1;
 
   const nameOf = (p: PlayerRankEntry) => p.username || p.display_name || (p.player_number != null ? `GR8-${p.player_number}` : 'Player');
+
+  const sortedPlayers = useMemo(() => {
+    const list = [...players];
+    if (playerSort === 'name') {
+      list.sort((a, b) => nameOf(a).localeCompare(nameOf(b), undefined, { sensitivity: 'base' }));
+    } else {
+      list.sort((a, b) => b.deeds - a.deeds);
+    }
+    return list;
+  }, [players, playerSort]);
 
   const tabs: { key: View; label: string; icon: React.ReactNode }[] = [
     { key: 'players', label: 'Players', icon: <Trophy className="w-4 h-4" /> },
@@ -323,30 +334,45 @@ const Leaderboard: React.FC = () => {
           <>
             {/* ── PLAYERS ─────────────────────────────────────────── */}
             {view === 'players' && (
-              <Panel>
-                <TableHead cols={['#', 'Player', 'Gr8Day Deeds', 'Last Deed']} />
-                {players.length === 0 ? (
-                  <Empty>No players ranked yet.</Empty>
-                ) : players.map((p, i) => (
-                  <div key={p.user_id} className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-800/70">
-                    <span className="w-5 text-center text-sm font-semibold text-slate-500 tabular-nums">{i + 1}</span>
-                    <Monogram label={nameOf(p)} />
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-white truncate">{nameOf(p)}</p>
-                      <p className="text-[11px] text-slate-500 truncate">
-                        {[p.city, p.country_name].filter(Boolean).join(', ') || (p.player_number != null ? `GR8-${p.player_number}` : '')}
-                      </p>
+              <div className="space-y-3">
+                <div className="flex gap-1 bg-slate-900 border border-slate-800 rounded-lg p-1">
+                  {([
+                    { key: 'deeds', label: 'Most Gr8Day Deeds' },
+                    { key: 'name', label: 'Name (A–Z)' },
+                  ] as const).map((s) => (
+                    <button key={s.key} onClick={() => setPlayerSort(s.key)}
+                      className={`flex-1 py-1.5 rounded-md text-xs font-medium transition-colors cursor-pointer ${
+                        playerSort === s.key ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white hover:bg-slate-800'
+                      }`}>
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+                <Panel>
+                  <TableHead cols={['#', 'Player', 'Gr8Day Deeds', 'Last Deed']} />
+                  {sortedPlayers.length === 0 ? (
+                    <Empty>No players ranked yet.</Empty>
+                  ) : sortedPlayers.map((p, i) => (
+                    <div key={p.user_id} className="flex items-center gap-3 px-4 py-2.5 border-t border-slate-800/70">
+                      <span className="w-5 text-center text-sm font-semibold text-slate-500 tabular-nums">{i + 1}</span>
+                      <Monogram label={nameOf(p)} />
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-white truncate">{nameOf(p)}</p>
+                        <p className="text-[11px] text-slate-500 truncate">
+                          {[p.city, p.country_name].filter(Boolean).join(', ') || (p.player_number != null ? `GR8-${p.player_number}` : '')}
+                        </p>
+                      </div>
+                      <div className="w-28 shrink-0">
+                        <p className="text-right text-sm font-bold text-white tabular-nums">{p.deeds.toLocaleString()}</p>
+                        <div className="mt-1"><RateBar ratio={p.deeds / maxDeeds} /></div>
+                      </div>
+                      <div className="w-24 shrink-0 text-right">
+                        <p className="text-xs text-slate-400 tabular-nums">{fmtPlayed(p.last_played)}</p>
+                      </div>
                     </div>
-                    <div className="w-28 shrink-0">
-                      <p className="text-right text-sm font-bold text-white tabular-nums">{p.deeds.toLocaleString()}</p>
-                      <div className="mt-1"><RateBar ratio={p.deeds / maxDeeds} /></div>
-                    </div>
-                    <div className="w-24 shrink-0 text-right">
-                      <p className="text-xs text-slate-400 tabular-nums">{fmtPlayed(p.last_played)}</p>
-                    </div>
-                  </div>
-                ))}
-              </Panel>
+                  ))}
+                </Panel>
+              </div>
             )}
 
             {/* ── STREAKS ─────────────────────────────────────────── */}
