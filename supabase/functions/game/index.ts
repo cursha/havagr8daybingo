@@ -193,6 +193,49 @@ async function getPlayerLevelState(
   return { levels, totalBingos, highestUnlocked, selected }
 }
 
+/** Fetch a player's targeting value IDs and a map of deed_id → Set of targeting_value_ids. */
+async function fetchTargetingData(
+  supabase: ReturnType<typeof getSupabase>,
+  userId: string,
+): Promise<{ playerValueIds: Set<number>; deedTargetingMap: Map<number, Set<number>> }> {
+  const { data: userValues } = await supabase
+    .from('user_targeting_values').select('targeting_value_id').eq('user_id', userId)
+  const playerValueIds = new Set<number>((userValues ?? []).map((r) => Number(r.targeting_value_id)))
+
+  const { data: deedValues } = await supabase
+    .from('deed_targeting_values').select('deed_id, targeting_value_id')
+  const deedTargetingMap = new Map<number, Set<number>>()
+  for (const r of deedValues ?? []) {
+    const deedId = Number(r.deed_id)
+    const valueId = Number(r.targeting_value_id)
+    if (!deedTargetingMap.has(deedId)) deedTargetingMap.set(deedId, new Set())
+    deedTargetingMap.get(deedId)!.add(valueId)
+  }
+
+  return { playerValueIds, deedTargetingMap }
+}
+
+/** Filter deeds to those matching the player's targeting values.
+ *  Deeds with no targeting entries are universal (always included).
+ *  Falls back to `fallback` if fewer than `minCount` deeds survive.
+ *  Returns candidates unchanged if the player has no targeting values set. */
+function filterDeedsByTargeting<T extends { id: number }>(
+  candidates: T[],
+  playerValueIds: Set<number>,
+  deedTargetingMap: Map<number, Set<number>>,
+  fallback: T[],
+  minCount = 24,
+): T[] {
+  if (playerValueIds.size === 0) return candidates
+  const filtered = candidates.filter((d) => {
+    const vals = deedTargetingMap.get(d.id)
+    if (!vals || vals.size === 0) return true
+    for (const v of vals) { if (playerValueIds.has(v)) return true }
+    return false
+  })
+  return filtered.length >= minCount ? filtered : fallback
+}
+
 /** Free-space cells (the I DARE YA centre) always count toward Bingo, even
  *  though they are never "marked". Returns their indices from the card data. */
 function freeSpaceIndices(cells: Cell[]): number[] {
@@ -542,7 +585,10 @@ Deno.serve(async (req: Request) => {
       // Never let level filtering starve the card; fall back to all active deeds.
       if (levelDeeds.length < 24) levelDeeds = deeds ?? []
 
-      const deedList = [...levelDeeds]
+      const { playerValueIds, deedTargetingMap } = await fetchTargetingData(supabase, user.sub)
+      const targetedDeeds = filterDeedsByTargeting(levelDeeds, playerValueIds, deedTargetingMap, levelDeeds)
+
+      const deedList = [...targetedDeeds]
       rng.shuffle(deedList)
       const selectedDeeds = deedList.slice(0, 24)
 
@@ -3275,9 +3321,15 @@ Deno.serve(async (req: Request) => {
 
           // Fetch a replacement deed that isn't already on the card
           const existingDeedIds = new Set(cells.map((c) => c.deed_id).filter((id): id is number => id != null))
+          const levelState = await getPlayerLevelState(supabase, user.sub)
+          const selectedLevel = levelState.selected
           const { data: replacementDeeds } = await supabase
             .from('good_deeds').select('*').eq('is_active', true)
-          const eligible = (replacementDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
+          const allEligible = (replacementDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
+          const levelEligible = allEligible.filter((d) => (d.complexity ?? 1) <= selectedLevel)
+          const swapPool = levelEligible.length >= 1 ? levelEligible : allEligible
+          const { playerValueIds: swapValueIds, deedTargetingMap: swapTargetingMap } = await fetchTargetingData(supabase, user.sub)
+          const eligible = filterDeedsByTargeting(swapPool, swapValueIds, swapTargetingMap, swapPool, 1)
 
           if (eligible.length === 0) {
             result.outcome = 'nothing'
