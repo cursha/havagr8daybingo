@@ -574,6 +574,19 @@ export async function setDeedTargeting(id: number, targeting_value_ids: number[]
   return apiClient.put(`/game/admin/deeds/${id}/targeting`, { targeting_value_ids });
 }
 
+// ---------- Player Targeting ----------
+export async function getTargetingAttributes(): Promise<{ attributes: TargetingAttribute[] }> {
+  return apiClient.get('/game/targeting-attributes');
+}
+
+export async function getMyTargeting(): Promise<{ targeting_value_ids: number[] }> {
+  return apiClient.get('/game/my-profile/targeting');
+}
+
+export async function setMyTargeting(targeting_value_ids: number[]): Promise<{ success: boolean }> {
+  return apiClient.put('/game/my-profile/targeting', { targeting_value_ids });
+}
+
 // ---------- Deed Suggestion / Approval ----------
 export interface PendingDeed {
   id: number;
