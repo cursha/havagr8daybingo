@@ -2188,6 +2188,13 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, updated, created, skipped, total: updated + created, targeting_warnings })
     }
 
+    // ── GET /admin/deeds/targeting-bulk ──────────────────────────────────────
+    if (method === 'GET' && path === '/admin/deeds/targeting-bulk') {
+      requireAdmin(authUser)
+      const { data } = await supabase.from('deed_targeting_values').select('deed_id, targeting_value_id')
+      return jsonResponse({ rows: data ?? [] })
+    }
+
     // ── GET /admin/targeting-attributes ──────────────────────────────────────
     if (method === 'GET' && path === '/admin/targeting-attributes') {
       requireAdmin(authUser)

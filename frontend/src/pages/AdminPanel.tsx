@@ -54,6 +54,7 @@ import {
   CellData,
   TargetingAttribute,
   getAdminTargetingAttributes,
+  getAdminDeedTargetingBulk,
   getDeedTargeting,
   setDeedTargeting,
 } from '@/lib/game-utils';
@@ -682,11 +683,41 @@ const AdminPanel: React.FC = () => {
     return result;
   }
 
-  function handleDownloadCsv() {
+  async function handleDownloadCsv() {
     const filtered = getFilteredSortedDeeds();
-    const header = ['id', 'category', 'complexity', 'quantity', 'deed_text', 'deed_text_long', 'is_active'].join(',');
-    const rows = filtered.map((d) =>
-      [
+
+    // Fetch targeting data in parallel with attribute definitions.
+    const [{ attributes }, { rows: targetingRows }] = await Promise.all([
+      getAdminTargetingAttributes(),
+      getAdminDeedTargetingBulk(),
+    ]);
+
+    // Build value_id → { attrSlug, label } lookup.
+    const valueInfo = new Map<number, { attrSlug: string; label: string }>();
+    for (const attr of attributes) {
+      const slug = 'targeting_' + attr.name.toLowerCase().replace(/\s+/g, '_');
+      for (const v of attr.values) valueInfo.set(v.id, { attrSlug: slug, label: v.label });
+    }
+
+    // Build deed_id → Map<attrSlug, labels[]>.
+    const deedTargeting = new Map<number, Map<string, string[]>>();
+    for (const row of targetingRows) {
+      const info = valueInfo.get(row.targeting_value_id);
+      if (!info) continue;
+      if (!deedTargeting.has(row.deed_id)) deedTargeting.set(row.deed_id, new Map());
+      const attrMap = deedTargeting.get(row.deed_id)!;
+      if (!attrMap.has(info.attrSlug)) attrMap.set(info.attrSlug, []);
+      attrMap.get(info.attrSlug)!.push(info.label);
+    }
+
+    // Targeting column slugs in display_order (matches import expectation).
+    const targetingCols = attributes.map((a) => 'targeting_' + a.name.toLowerCase().replace(/\s+/g, '_'));
+
+    const header = ['id', 'category', 'complexity', 'quantity', 'deed_text', 'deed_text_long', 'is_active', ...targetingCols].join(',');
+    const rows = filtered.map((d) => {
+      const deedAttrs = deedTargeting.get(d.id);
+      const targetingFields = targetingCols.map((slug) => toCsvField((deedAttrs?.get(slug) ?? []).join('|')));
+      return [
         toCsvField(d.id),
         toCsvField(d.category),
         toCsvField(d.complexity),
@@ -694,8 +725,10 @@ const AdminPanel: React.FC = () => {
         toCsvField(d.deed_text),
         toCsvField(d.deed_text_long),
         toCsvField(d.is_active),
-      ].join(',')
-    );
+        ...targetingFields,
+      ].join(',');
+    });
+
     const csv = [header, ...rows].join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);

@@ -567,6 +567,10 @@ export async function getAdminTargetingAttributes(): Promise<{ attributes: Targe
   return apiClient.get('/game/admin/targeting-attributes');
 }
 
+export async function getAdminDeedTargetingBulk(): Promise<{ rows: { deed_id: number; targeting_value_id: number }[] }> {
+  return apiClient.get('/game/admin/deeds/targeting-bulk');
+}
+
 export async function getDeedTargeting(id: number): Promise<{ targeting_value_ids: number[] }> {
   return apiClient.get(`/game/admin/deeds/${id}/targeting`);
 }
