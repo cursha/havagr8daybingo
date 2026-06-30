@@ -2127,6 +2127,50 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true, updated, created, skipped, total: updated + created })
     }
 
+    // ── GET /admin/targeting-attributes ──────────────────────────────────────
+    if (method === 'GET' && path === '/admin/targeting-attributes') {
+      requireAdmin(authUser)
+      const { data: attrs } = await supabase
+        .from('targeting_attributes').select('id, name, display_order')
+        .eq('is_active', true).order('display_order')
+      const { data: vals } = await supabase
+        .from('targeting_values').select('id, attribute_id, label, description, is_default, display_order')
+        .eq('is_active', true).order('display_order')
+      const valsByAttr = new Map<number, typeof vals>()
+      for (const v of vals ?? []) {
+        if (!valsByAttr.has(v.attribute_id)) valsByAttr.set(v.attribute_id, [])
+        valsByAttr.get(v.attribute_id)!.push(v)
+      }
+      const attributes = (attrs ?? []).map((a) => ({
+        id: a.id, name: a.name, display_order: a.display_order,
+        values: valsByAttr.get(a.id) ?? [],
+      }))
+      return jsonResponse({ attributes })
+    }
+
+    // ── GET + PUT /admin/deeds/:id/targeting (must be before /:id PUT/DELETE) ─
+    const deedTargetingMatch = path.match(/^\/admin\/deeds\/(\d+)\/targeting$/)
+    if (method === 'GET' && deedTargetingMatch) {
+      requireAdmin(authUser)
+      const deedId = parseInt(deedTargetingMatch[1])
+      const { data } = await supabase
+        .from('deed_targeting_values').select('targeting_value_id').eq('deed_id', deedId)
+      return jsonResponse({ targeting_value_ids: (data ?? []).map((r) => Number(r.targeting_value_id)) })
+    }
+    if (method === 'PUT' && deedTargetingMatch) {
+      requireAdmin(authUser)
+      const deedId = parseInt(deedTargetingMatch[1])
+      const body = await req.json()
+      const ids: number[] = (body.targeting_value_ids ?? []).map(Number).filter((n: number) => Number.isFinite(n) && n > 0)
+      await supabase.from('deed_targeting_values').delete().eq('deed_id', deedId)
+      if (ids.length > 0) {
+        const rows = ids.map((v) => ({ deed_id: deedId, targeting_value_id: v }))
+        const { error } = await supabase.from('deed_targeting_values').insert(rows)
+        if (error) throw error
+      }
+      return jsonResponse({ success: true })
+    }
+
     // ── PUT /admin/deeds/:id ──────────────────────────────────────────────────
     const deedPutMatch = matchPath('/admin/deeds/:id', path)
     if (method === 'PUT' && deedPutMatch) {
