@@ -193,6 +193,22 @@ async function getPlayerLevelState(
   return { levels, totalBingos, highestUnlocked, selected }
 }
 
+/** Auto-promote challenge_level when a bingo crosses a new level threshold.
+ *  Only fires when highestUnlocked actually increases; leaves manual play-down
+ *  choices untouched on bingos that don't cross a new threshold. */
+async function maybeAutoLevelUp(
+  supabase: ReturnType<typeof getSupabase>,
+  userId: string,
+): Promise<{ leveled_up: boolean; new_level: number; previous_level: number }> {
+  const st = await getPlayerLevelState(supabase, userId)
+  const prevHighest = highestUnlockedLevel(Math.max(0, st.totalBingos - 1), st.levels)
+  if (st.highestUnlocked <= prevHighest) {
+    return { leveled_up: false, new_level: st.selected, previous_level: st.selected }
+  }
+  await supabase.from('users').update({ challenge_level: st.highestUnlocked }).eq('id', userId)
+  return { leveled_up: true, new_level: st.highestUnlocked, previous_level: st.selected }
+}
+
 /** Fetch a player's targeting value IDs and a map of deed_id → Set of targeting_value_ids. */
 async function fetchTargetingData(
   supabase: ReturnType<typeof getSupabase>,
@@ -854,6 +870,7 @@ Deno.serve(async (req: Request) => {
       }
 
       // First time the card reaches Bingo: award bingo bonus + congratulate by email.
+      let markLevelUp: { leveled_up: boolean; new_level: number; previous_level: number } | null = null
       if (isBingo && !card.is_bingo) {
         await awardBingoBonus(supabase, {
           playerId: user.sub, cardId: card_id, weekYear: card.week_year, settings: drawSettings,
@@ -862,6 +879,7 @@ Deno.serve(async (req: Request) => {
           const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
           await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
         }
+        markLevelUp = await maybeAutoLevelUp(supabase, user.sub)
       }
 
       // Update daily streak
@@ -870,6 +888,7 @@ Deno.serve(async (req: Request) => {
       const resp: Record<string, unknown> = { success: true, completed_cells: completed, is_bingo: isBingo }
       if (secretRewardAwarded !== null) resp.secret_reward = secretRewardAwarded
       if (isBingo && !card.is_bingo) resp.draw_entered = true
+      if (markLevelUp?.leveled_up) resp.level_up = { previous_level: markLevelUp.previous_level, new_level: markLevelUp.new_level }
       if (streakResult.streak_updated) {
         resp.streak_update = {
           current_streak_days: streakResult.current_streak_days,
@@ -960,6 +979,7 @@ Deno.serve(async (req: Request) => {
       // First time the card reaches Bingo: award bingo bonus + congratulate by email.
       // Note: a purchased square is not a completed deed, so it earns NO deed entry,
       // but it CAN complete a bingo, which still earns the configured bonus.
+      let purchaseLevelUp: { leveled_up: boolean; new_level: number; previous_level: number } | null = null
       if (isBingo && !card.is_bingo) {
         await awardBingoBonus(supabase, {
           playerId: user.sub, cardId: card_id, weekYear: card.week_year,
@@ -968,9 +988,12 @@ Deno.serve(async (req: Request) => {
           const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
           await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
         }
+        purchaseLevelUp = await maybeAutoLevelUp(supabase, user.sub)
       }
 
-      return jsonResponse({ success: true, purchased_cells: purchased, new_balance: newBalance, is_bingo: isBingo })
+      const purchaseResp: Record<string, unknown> = { success: true, purchased_cells: purchased, new_balance: newBalance, is_bingo: isBingo }
+      if (purchaseLevelUp?.leveled_up) purchaseResp.level_up = { previous_level: purchaseLevelUp.previous_level, new_level: purchaseLevelUp.new_level }
+      return jsonResponse(purchaseResp)
     }
 
     // ── POST /submit-referral ─────────────────────────────────────────────────
