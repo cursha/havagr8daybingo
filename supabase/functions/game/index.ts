@@ -311,7 +311,9 @@ async function recordCompletedDeed(
     const { data: tm } = await supabase
       .from('team_members').select('team_id').eq('user_id', opts.playerId).maybeSingle()
     let category = opts.category ?? null
-    if (!category && opts.deedId != null) {
+    // Live lookup only for quick_action: bingo_card deeds use the frozen
+    // category from card_data so history reflects the value at generation time.
+    if (!category && opts.deedId != null && opts.sourceType === 'quick_action') {
       const { data: d } = await supabase.from('good_deeds').select('category').eq('id', opts.deedId).maybeSingle()
       category = d?.category ?? null
     }
@@ -491,15 +493,16 @@ Deno.serve(async (req: Request) => {
         // Re-sync each cell's quantity from the current good_deeds table so that
         // when an admin changes a deed's quantity, existing cards pick it up
         // (card_data is a snapshot taken at generation time).
+        // Category is intentionally NOT re-synced: it is frozen at generation
+        // so that completed-deed history reflects the category in effect when
+        // the player received their card, not any later admin edit.
         const deedIds = cells.map((c) => c.deed_id).filter((id): id is number => id != null)
         if (deedIds.length > 0) {
           const { data: freshDeeds } = await supabase
-            .from('good_deeds').select('id, quantity, category').in('id', deedIds)
+            .from('good_deeds').select('id, quantity').in('id', deedIds)
           const qtyById = new Map<number, number>()
-          const catById = new Map<number, string | null>()
           for (const d of freshDeeds ?? []) {
             qtyById.set(d.id, d.quantity ?? 1)
-            catById.set(d.id, d.category ?? null)
           }
           for (const c of cells) {
             if (c.deed_id != null && qtyById.has(c.deed_id)) {
@@ -508,7 +511,6 @@ Deno.serve(async (req: Request) => {
                 c.quantity = freshQty
                 needsSave = true
               }
-              c.category = catById.get(c.deed_id) ?? null
             }
           }
         }
