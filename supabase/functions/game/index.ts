@@ -23,18 +23,29 @@ interface Cell {
   secret_revealed?: boolean
   quantity: number
   category: string | null
+  // I Bet Ya — snapshotted at generation, revealed on first center-cell click
+  bet_ya_outcome_type?: string | null
+  bet_ya_label?: string | null
+  bet_ya_action_value?: number | null
+  bet_ya_revealed?: boolean
 }
 
 // ── Security: strip secret fields before sending cells to client ─────────────
-// is_secret and secret_reward must never be exposed until the square is revealed.
+// is_secret/secret_reward and bet_ya outcome details must never be exposed
+// until the respective square has been revealed by the player.
 function sanitizeCells(cells: Cell[], completedCells: number[]): unknown[] {
   return cells.map((c) => {
-    const revealed = c.secret_revealed === true || completedCells.includes(c.index)
-    const { is_secret, secret_reward, secret_revealed, ...rest } = c
+    const secretRevealed = c.secret_revealed === true || completedCells.includes(c.index)
+    const { is_secret, secret_reward, secret_revealed,
+            bet_ya_outcome_type, bet_ya_label, bet_ya_action_value,
+            ...rest } = c
     return {
       ...rest,
-      // Only tell the client a square is secret AFTER it has been marked
-      ...(is_secret && revealed ? { is_secret: true, secret_reward, secret_revealed: true } : {}),
+      ...(is_secret && secretRevealed ? { is_secret: true, secret_reward, secret_revealed: true } : {}),
+      // Expose I Bet Ya details only after the player has clicked and revealed
+      ...(c.bet_ya_revealed
+        ? { bet_ya_outcome_type, bet_ya_label, bet_ya_action_value }
+        : {}),
     }
   })
 }
@@ -263,6 +274,38 @@ const WIN_LABELS: Record<string, string> = {
   x_pattern: 'X Pattern', around_the_edges: 'Around the Edges', fill_card: 'Fill the Card',
 }
 function winLabel(cond: string): string { return WIN_LABELS[cond] ?? cond }
+
+/** First-time-bingo award: bonus + win email + level-up check. Called from
+ *  every cell-completion path (mark-cell, purchase-cell, bet-ya-reveal,
+ *  bet-ya-refer-friend) the instant a card transitions from not-bingo to
+ *  bingo. This used to be copy-pasted at each call site — bet-ya-reveal once
+ *  shipped without it entirely, which is exactly the failure mode a single
+ *  shared entry point prevents. No-op (returns null) unless this call is the
+ *  one that just flipped the card into bingo. */
+async function awardBingoIfNewlyWon(
+  supabase: ReturnType<typeof getSupabase>,
+  opts: {
+    playerId: string
+    cardId: number
+    weekYear: string
+    winCondition: string
+    wasAlreadyBingo: boolean
+    isBingoNow: boolean
+    userEmail?: string | null
+    userName?: string | null
+  },
+): Promise<{ leveled_up: boolean; new_level: number; previous_level: number } | null> {
+  if (!opts.isBingoNow || opts.wasAlreadyBingo) return null
+  const drawSettings = await getDrawSettings(supabase)
+  await awardBingoBonus(supabase, {
+    playerId: opts.playerId, cardId: opts.cardId, weekYear: opts.weekYear, settings: drawSettings,
+  })
+  if (opts.userEmail) {
+    const tpl = bingoWinEmail(opts.userName ?? null, winLabel(opts.winCondition))
+    await sendEmail({ to: opts.userEmail, subject: tpl.subject, html: tpl.html })
+  }
+  return await maybeAutoLevelUp(supabase, opts.playerId)
+}
 
 /** Impact Board time filters: ISO start of the current month/quarter/year, or
  *  null for "life to date" (no lower bound). UTC-based. */
@@ -560,7 +603,6 @@ Deno.serve(async (req: Request) => {
           purchased_cells: parseJsonArr(existing.purchased_cells),
           referral_cells: parseJsonArr(existing.referral_cells),
           is_bingo: existing.is_bingo ?? false,
-          dare_clicks: existing.dare_clicks ?? 0,
           draw_entered: drawEntry != null,
         })
       }
@@ -633,6 +675,41 @@ Deno.serve(async (req: Request) => {
         return roll <= dollar1Pct ? 0.5 : roll <= dollar1Pct + dollar2Pct ? 1.0 : 2.0
       })
 
+      // Snapshot one I Bet Ya outcome onto the center cell (classic modes only).
+      // fill_card (blackout) leaves the center as a plain free space.
+      interface BetYaRow {
+        id: number; label: string; odds_percent: number; action_type: string
+        credit_amount: number; remove_amount: number; reward_amount: number
+      }
+      let betYaOutcomeType: string | null = null
+      let betYaLabel: string | null = null
+      let betYaActionValue: number | null = null
+      if (adminWinCondition !== 'fill_card') {
+        const { data: betYaRows } = await supabase
+          .from('bet_ya_outcomes').select('id, label, odds_percent, action_type, credit_amount, remove_amount, reward_amount')
+          .eq('is_active', true)
+        const pool = (betYaRows ?? []) as BetYaRow[]
+        if (pool.length > 0) {
+          const total = pool.reduce((s, r) => s + Number(r.odds_percent), 0)
+          const randBuf = new Uint32Array(1)
+          crypto.getRandomValues(randBuf)
+          let roll = (randBuf[0] / 4_294_967_296) * total
+          let picked = pool[pool.length - 1]
+          for (const r of pool) {
+            roll -= Number(r.odds_percent)
+            if (roll <= 0) { picked = r; break }
+          }
+          betYaOutcomeType = picked.action_type
+          betYaLabel = picked.label
+          // Freeze the one dollar amount relevant to this outcome type at
+          // generation time — the reveal endpoint just reads bet_ya_action_value.
+          betYaActionValue = picked.action_type === 'fund_credit' ? Number(picked.credit_amount)
+            : picked.action_type === 'remove_funds' ? Number(picked.remove_amount)
+            : picked.action_type === 'refer_friend' ? Number(picked.reward_amount)
+            : 0
+        }
+      }
+
       const cells: Cell[] = []
       let deedIdx = 0
       for (let i = 0; i < 25; i++) {
@@ -642,6 +719,10 @@ Deno.serve(async (req: Request) => {
             deed_text_long: 'Tap the centre square to take the I DARE YA challenge — you might win a little, lose a little, or get dared to refer a friend. The centre is a free space and always counts toward your Bingo.',
             deed_id: null, is_free_space: true, is_purchasable: false, purchase_price: null,
             is_referral_free: false, is_secret: false, secret_reward: null, quantity: 1,
+            bet_ya_outcome_type: betYaOutcomeType,
+            bet_ya_label: betYaLabel,
+            bet_ya_action_value: betYaActionValue,
+            bet_ya_revealed: false,
           })
         } else {
           const deed = selectedDeeds[deedIdx++]
@@ -872,17 +953,11 @@ Deno.serve(async (req: Request) => {
       }
 
       // First time the card reaches Bingo: award bingo bonus + congratulate by email.
-      let markLevelUp: { leveled_up: boolean; new_level: number; previous_level: number } | null = null
-      if (isBingo && !card.is_bingo) {
-        await awardBingoBonus(supabase, {
-          playerId: user.sub, cardId: card_id, weekYear: card.week_year, settings: drawSettings,
-        })
-        if (user.email) {
-          const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-          await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
-        }
-        markLevelUp = await maybeAutoLevelUp(supabase, user.sub)
-      }
+      const markLevelUp = await awardBingoIfNewlyWon(supabase, {
+        playerId: user.sub, cardId: card_id, weekYear: card.week_year, winCondition: card.win_condition,
+        wasAlreadyBingo: card.is_bingo, isBingoNow: isBingo,
+        userEmail: user.email, userName: user.name as string | undefined,
+      })
 
       // Update daily streak
       const streakResult = await updatePlayerStreak(supabase, user.sub)
@@ -924,7 +999,7 @@ Deno.serve(async (req: Request) => {
         week_year: card.week_year,
         cells: sanitizeCells(JSON.parse(card.card_data), []),
         win_condition: card.win_condition,
-        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false, dare_clicks: 0,
+        completed_cells: [], purchased_cells: [], referral_cells: [], is_bingo: false,
       })
     }
 
@@ -981,17 +1056,11 @@ Deno.serve(async (req: Request) => {
       // First time the card reaches Bingo: award bingo bonus + congratulate by email.
       // Note: a purchased square is not a completed deed, so it earns NO deed entry,
       // but it CAN complete a bingo, which still earns the configured bonus.
-      let purchaseLevelUp: { leveled_up: boolean; new_level: number; previous_level: number } | null = null
-      if (isBingo && !card.is_bingo) {
-        await awardBingoBonus(supabase, {
-          playerId: user.sub, cardId: card_id, weekYear: card.week_year,
-        })
-        if (user.email) {
-          const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-          await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
-        }
-        purchaseLevelUp = await maybeAutoLevelUp(supabase, user.sub)
-      }
+      const purchaseLevelUp = await awardBingoIfNewlyWon(supabase, {
+        playerId: user.sub, cardId: card_id, weekYear: card.week_year, winCondition: card.win_condition,
+        wasAlreadyBingo: card.is_bingo, isBingoNow: isBingo,
+        userEmail: user.email, userName: user.name as string | undefined,
+      })
 
       const purchaseResp: Record<string, unknown> = { success: true, purchased_cells: purchased, new_balance: newBalance, is_bingo: isBingo }
       if (purchaseLevelUp?.leveled_up) purchaseResp.level_up = { previous_level: purchaseLevelUp.previous_level, new_level: purchaseLevelUp.new_level }
@@ -2095,7 +2164,6 @@ Deno.serve(async (req: Request) => {
           purchased_cells: parseJsonArr(card.purchased_cells),
           referral_cells: parseJsonArr(card.referral_cells),
           is_bingo: card.is_bingo,
-          dare_clicks: card.dare_clicks ?? 0,
         } : null,
       })
     }
@@ -3356,334 +3424,6 @@ Deno.serve(async (req: Request) => {
       return jsonResponse({ success: true })
     }
 
-    // ── POST /dare-spin ───────────────────────────────────────────────────────
-    // Spin the Dare wheel for the current player's active card.
-    //
-    // Confirmed design rules (hardcoded, not admin-toggleable):
-    //   1. No negative balance — ever. If remove_funds would take the wallet
-    //      below $0.00, re-roll until a non-remove_funds outcome is selected.
-    //   2. swap_square always un-marks the swapped cell. The player must complete
-    //      the new deed before the square counts.
-    //   3. Dare clicks are per-week per-card. dare_clicks lives on player_cards
-    //      which has one row per player per week, so it resets automatically when
-    //      a new card is generated.
-    if (method === 'POST' && path === '/dare-spin') {
-      const user = requireAuth(authUser)
-      const body = await req.json()
-      const { card_id } = body
-
-      // Load the player's card
-      const { data: card } = await supabase
-        .from('player_cards').select('*')
-        .eq('id', card_id).eq('user_id', user.sub).maybeSingle()
-      if (!card) return errorResponse('Card not found', 404)
-
-      // Hardcoded: 1 dare spin per card per week (resets automatically with new card)
-      const maxSpins = 1
-      const dareClicks: number = card.dare_clicks ?? 0
-      if (dareClicks >= maxSpins) {
-        return errorResponse('You have already used your Dare Spin for this week', 400)
-      }
-
-      // Check dare_enabled
-      const { data: enabledCfg } = await supabase
-        .from('game_configs').select('config_value')
-        .eq('config_key', 'dare_enabled').maybeSingle()
-      if (enabledCfg?.config_value === 'false') {
-        return errorResponse('Dare Spin is currently disabled', 400)
-      }
-
-      // ── Load outcome weights from game_configs ──────────────────────────────
-      // Keys that start with dare_outcome_* each have format "weight:amount"
-      const { data: cfgRows } = await supabase
-        .from('game_configs').select('config_key, config_value')
-        .like('config_key', 'dare_outcome_%')
-
-      type OutcomeType = 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing'
-      interface Outcome { type: OutcomeType; label: string; weight: number; amount: number }
-
-      const typeMap: Record<string, OutcomeType> = {
-        'dare_outcome_add_funds_2':  'add_funds',
-        'dare_outcome_add_funds_1':  'add_funds',
-        'dare_outcome_add_funds_50': 'add_funds',
-        'dare_outcome_remove_funds': 'remove_funds',
-        'dare_outcome_refer_player': 'refer_player',
-        'dare_outcome_swap_square':  'swap_square',
-        'dare_outcome_nothing':      'nothing',
-      }
-      const labelMap: Record<string, string> = {
-        'dare_outcome_add_funds_2':  '+$2.00',
-        'dare_outcome_add_funds_1':  '+$1.00',
-        'dare_outcome_add_funds_50': '+$0.50',
-        'dare_outcome_remove_funds': '-$0.50',
-        'dare_outcome_refer_player': 'Refer a Player!',
-        'dare_outcome_swap_square':  'Surprise Deed!',
-        'dare_outcome_nothing':      'No Effect',
-      }
-
-      const outcomes: Outcome[] = []
-      for (const row of (cfgRows ?? [])) {
-        const type = typeMap[row.config_key]
-        if (!type) continue
-        const [wStr, aStr] = (row.config_value ?? '0:0').split(':')
-        const weight = parseInt(wStr ?? '0') || 0
-        const amount = parseFloat(aStr ?? '0') || 0
-        if (weight <= 0) continue
-        outcomes.push({ type, label: labelMap[row.config_key] ?? type, weight, amount })
-      }
-
-      if (outcomes.length === 0) {
-        return errorResponse('No dare outcomes configured', 500)
-      }
-
-      // ── Weighted random selection ───────────────────────────────────────────
-      // Uses crypto.getRandomValues for genuine randomness (not seeded).
-      function pickOutcome(pool: Outcome[]): Outcome {
-        const totalWeight = pool.reduce((s, o) => s + o.weight, 0)
-        const randBuf = new Uint32Array(1)
-        crypto.getRandomValues(randBuf)
-        let roll = (randBuf[0] / 4_294_967_296) * totalWeight
-        for (const o of pool) {
-          roll -= o.weight
-          if (roll <= 0) return o
-        }
-        return pool[pool.length - 1]
-      }
-
-      // Load wallet balance for negative-balance check
-      let { data: wallet } = await supabase
-        .from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
-      if (!wallet) {
-        const { data: w } = await supabase
-          .from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
-        wallet = w
-      }
-      const currentBalance = parseFloat(wallet.balance)
-
-      // ── "Refer a Player" cadence (Curt's rule, table-driven) ────────────────
-      // On the player's Nth dare spin (config dare_refer_forced_spin, default 3)
-      // the spin is GUARANTEED to land on Refer a Player ("they've played N
-      // times, clearly they enjoy it — now invite a friend"). On every other
-      // spin, Refer a Player is just one weighted outcome (~15-20%, table-driven
-      // via dare_outcome_refer_player). Set the threshold to 0 to disable forcing.
-      const { data: spinUser } = await supabase
-        .from('users').select('dare_total_spins').eq('id', user.sub).maybeSingle()
-      const priorSpins: number = spinUser?.dare_total_spins ?? 0
-      const thisSpinNumber = priorSpins + 1
-      const { data: forcedCfg } = await supabase
-        .from('game_configs').select('config_value')
-        .eq('config_key', 'dare_refer_forced_spin').maybeSingle()
-      const forcedReferSpin = parseInt(forcedCfg?.config_value ?? '3') || 0
-
-      // Pick outcome.
-      let chosen: Outcome
-      if (forcedReferSpin > 0 && thisSpinNumber === forcedReferSpin) {
-        chosen = outcomes.find((o) => o.type === 'refer_player')
-          ?? { type: 'refer_player', label: 'Refer a Player!', weight: 1, amount: 0 }
-      } else {
-        chosen = pickOutcome(outcomes)
-        // Rule 1: if remove_funds would take the wallet negative, re-roll to a
-        // non-remove_funds outcome (hardcoded, not configurable).
-        if (chosen.type === 'remove_funds' && currentBalance - chosen.amount < 0) {
-          const safePool = outcomes.filter((o) => o.type !== 'remove_funds')
-          chosen = safePool.length > 0
-            ? pickOutcome(safePool)
-            : { type: 'nothing', label: 'No Effect', weight: 1, amount: 0 }
-        }
-      }
-
-      // ── Execute the chosen outcome ──────────────────────────────────────────
-      const cells: Cell[] = JSON.parse(card.card_data)
-      const completed = parseJsonArr(card.completed_cells)
-      const purchased = parseJsonArr(card.purchased_cells)
-      const referral = parseJsonArr(card.referral_cells)
-
-      let newBalance = currentBalance
-      const result: Record<string, unknown> = { outcome: chosen.type, label: chosen.label, amount: chosen.amount }
-
-      if (chosen.type === 'add_funds') {
-        newBalance = currentBalance + chosen.amount
-        await supabase.from('player_wallets')
-          .update({ balance: newBalance, updated_at: new Date().toISOString() })
-          .eq('user_id', user.sub)
-        await supabase.from('wallet_transactions').insert({
-          user_id: user.sub,
-          amount: chosen.amount,
-          transaction_type: 'dare_reward',
-          item_description: `Dare Spin reward (+$${chosen.amount.toFixed(2)})`,
-        })
-        result.new_balance = newBalance
-
-      } else if (chosen.type === 'remove_funds') {
-        // Rule 1 already guaranteed this won't go negative.
-        newBalance = Math.max(0, currentBalance - chosen.amount)
-        await supabase.from('player_wallets')
-          .update({ balance: newBalance, updated_at: new Date().toISOString() })
-          .eq('user_id', user.sub)
-        await supabase.from('wallet_transactions').insert({
-          user_id: user.sub,
-          amount: -chosen.amount,
-          transaction_type: 'dare_penalty',
-          item_description: `Dare Spin penalty (-$${chosen.amount.toFixed(2)})`,
-        })
-        result.new_balance = newBalance
-
-      } else if (chosen.type === 'swap_square') {
-        // Pick a random uncompleted, non-special cell to swap.
-        // "Uncompleted" means not in completed, purchased, or referral arrays.
-        const allMarked = new Set([...completed, ...purchased, ...referral])
-        const swappableCells = cells.filter(
-          (c) => !c.is_free_space && !c.is_purchasable && !c.is_referral_free && !allMarked.has(c.index)
-        )
-        if (swappableCells.length === 0) {
-          // No eligible cells — fall back to nothing
-          result.outcome = 'nothing'
-          result.swap_skipped_reason = 'no_eligible_cells'
-        } else {
-          // Pick a random cell from swappable pool
-          const randBuf2 = new Uint32Array(1)
-          crypto.getRandomValues(randBuf2)
-          const swapIdx = Math.floor((randBuf2[0] / 4_294_967_296) * swappableCells.length)
-          const targetCell = swappableCells[swapIdx]
-
-          // Fetch a replacement deed that isn't already on the card
-          const existingDeedIds = new Set(cells.map((c) => c.deed_id).filter((id): id is number => id != null))
-          const levelState = await getPlayerLevelState(supabase, user.sub)
-          const selectedLevel = levelState.selected
-          const { data: replacementDeeds } = await supabase
-            .from('good_deeds').select('*').eq('is_active', true)
-          const allEligible = (replacementDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
-          const levelEligible = allEligible.filter((d) => (d.complexity ?? 1) <= selectedLevel)
-          const swapPool = levelEligible.length >= 1 ? levelEligible : allEligible
-          const { playerValueIds: swapValueIds, deedTargetingMap: swapTargetingMap } = await fetchTargetingData(supabase, user.sub)
-          const eligible = filterDeedsByTargeting(swapPool, swapValueIds, swapTargetingMap, swapPool, 1)
-
-          if (eligible.length === 0) {
-            result.outcome = 'nothing'
-            result.swap_skipped_reason = 'no_replacement_deeds'
-          } else {
-            const randBuf3 = new Uint32Array(1)
-            crypto.getRandomValues(randBuf3)
-            const newDeed = eligible[Math.floor((randBuf3[0] / 4_294_967_296) * eligible.length)]
-
-            // Swap the cell deed
-            cells[targetCell.index] = {
-              ...targetCell,
-              deed_text: newDeed.deed_text,
-              deed_text_long: newDeed.deed_text_long ?? null,
-              deed_id: newDeed.id,
-              quantity: newDeed.quantity ?? 1,
-              is_secret: false,
-              secret_reward: null,
-              secret_revealed: false,
-            }
-
-            // Rule 2: swap_square ALWAYS un-marks the swapped cell.
-            // Remove it from completed_cells so the player must complete the new deed.
-            const updatedCompleted = completed.filter((i) => i !== targetCell.index)
-            const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
-            const isBingo = checkBingo(allCompleted, card.win_condition)
-
-            await supabase.from('player_cards').update({
-              card_data: JSON.stringify(cells),
-              completed_cells: JSON.stringify(updatedCompleted),
-              is_bingo: isBingo,
-              updated_at: new Date().toISOString(),
-            }).eq('id', card_id)
-
-            result.swapped_cell_index = targetCell.index
-            result.old_deed = targetCell.deed_text
-            result.new_deed = newDeed.deed_text
-            result.completed_cells = updatedCompleted
-            result.is_bingo = isBingo
-          }
-        }
-
-      } else if (chosen.type === 'refer_player') {
-        // No game state change — frontend shows the referral UI
-        result.outcome = 'refer_player'
-        result.message = 'Refer a new player to unlock this square!'
-
-      } else if (chosen.type === 'mark_random') {
-        // Auto-mark a random uncompleted, non-special cell.
-        const allMarked2 = new Set([...completed, ...purchased, ...referral])
-        const markableCells = cells.filter(
-          (c) => !c.is_purchasable && !c.is_referral_free && !c.is_free_space && !allMarked2.has(c.index)
-        )
-        if (markableCells.length === 0) {
-          result.outcome = 'nothing'
-          result.mark_skipped_reason = 'no_eligible_cells'
-        } else {
-          const randBuf4 = new Uint32Array(1)
-          crypto.getRandomValues(randBuf4)
-          const markCell = markableCells[Math.floor((randBuf4[0] / 4_294_967_296) * markableCells.length)]
-          const updatedCompleted2 = [...completed, markCell.index]
-          const allCompleted2 = [...new Set([...updatedCompleted2, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
-          const isBingo2 = checkBingo(allCompleted2, card.win_condition)
-
-          await supabase.from('player_cards').update({
-            completed_cells: JSON.stringify(updatedCompleted2),
-            is_bingo: isBingo2,
-            updated_at: new Date().toISOString(),
-          }).eq('id', card_id)
-
-          // The dare auto-mark IS a completed deed. Record it (this previously
-          // never happened, so dare-marked deeds were invisible to the Impact
-          // Board and the draw) and award its draw entry.
-          const dareDeedId = await recordCompletedDeed(supabase, {
-            playerId: user.sub,
-            sourceType: 'bingo_card',
-            deedId: (markCell as { deed_id?: number | null }).deed_id ?? null,
-            cardId: card_id,
-            cellIndex: markCell.index,
-            category: (markCell as { category?: string | null }).category ?? null,
-          })
-          const dareSettings = await getDrawSettings(supabase)
-          if (dareDeedId != null) {
-            await awardDeedEntry(supabase, {
-              completedDeedId: dareDeedId, playerId: user.sub, weekYear: card.week_year,
-              sourceType: 'bingo_card', settings: dareSettings,
-            })
-          }
-
-          // First time reaching bingo via dare: award bingo bonus + send email
-          if (isBingo2 && !card.is_bingo) {
-            await awardBingoBonus(supabase, {
-              playerId: user.sub, cardId: card_id, weekYear: card.week_year, settings: dareSettings,
-            })
-            if (user.email) {
-              const tpl = bingoWinEmail((user.name as string | undefined) ?? null, winLabel(card.win_condition))
-              await sendEmail({ to: user.email, subject: tpl.subject, html: tpl.html })
-            }
-          }
-
-          result.marked_cell_index = markCell.index
-          result.marked_deed = markCell.deed_text
-          result.completed_cells = updatedCompleted2
-          result.is_bingo = isBingo2
-        }
-
-      } else {
-        // nothing — no game state change
-        result.message = 'No effect this time. Better luck next spin!'
-      }
-
-      // Increment dare_clicks regardless of outcome
-      await supabase.from('player_cards')
-        .update({ dare_clicks: dareClicks + 1, updated_at: new Date().toISOString() })
-        .eq('id', card_id)
-
-      // Increment the player's cumulative dare-spin count (drives the forced
-      // "Refer a Player" cadence above — resets never; counts across weeks).
-      await supabase.from('users')
-        .update({ dare_total_spins: thisSpinNumber })
-        .eq('id', user.sub)
-
-      result.dare_clicks_used = dareClicks + 1
-      result.dare_clicks_remaining = Math.max(0, maxSpins - (dareClicks + 1))
-      return jsonResponse({ success: true, ...result })
-    }
-
     // ── GET /my-profile ───────────────────────────────────────────────────────
     if (method === 'GET' && path === '/my-profile') {
       const user = requireAuth(authUser)
@@ -4124,6 +3864,396 @@ Deno.serve(async (req: Request) => {
       const id = parseInt(smDeleteMatch[1])
       await supabase.from('player_streak_achievements').delete().eq('milestone_id', id)
       await supabase.from('streak_milestones').delete().eq('id', id)
+      return jsonResponse({ success: true })
+    }
+
+    // ── POST /bet-ya-reveal ───────────────────────────────────────────────────
+    // Player clicks the centre cell — execute the pre-snapshotted I Bet Ya
+    // outcome. Fires once per card for every outcome except refer_friend
+    // (bet_ya_revealed guards re-entry); refer_friend stays unrevealed and
+    // re-invocable until /bet-ya-refer-friend actually matches an email.
+    if (method === 'POST' && path === '/bet-ya-reveal') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { card_id } = body as { card_id: number }
+
+      const { data: card } = await supabase
+        .from('player_cards').select('*').eq('id', card_id).eq('user_id', user.sub).maybeSingle()
+      if (!card) return errorResponse('Card not found', 404)
+
+      const cells: Cell[] = JSON.parse(card.card_data)
+      const centerCell = cells[12]
+
+      if (!centerCell?.bet_ya_outcome_type) {
+        return errorResponse('No I Bet Ya outcome on this card', 400)
+      }
+      if (centerCell.bet_ya_revealed) {
+        return errorResponse('I Bet Ya outcome already revealed', 400)
+      }
+
+      const outcomeType = centerCell.bet_ya_outcome_type
+      const actionValue = Number(centerCell.bet_ya_action_value ?? 0)
+      const result: Record<string, unknown> = {
+        outcome: outcomeType,
+        label: centerCell.bet_ya_label ?? outcomeType,
+        amount: actionValue,
+      }
+
+      // Atomically claim this reveal before executing any side effect, so two
+      // concurrent requests for the same card can't both pass the "not yet
+      // revealed" check above and double-apply a wallet credit/debit or a
+      // duplicate bingo award. Uses updated_at as an optimistic-concurrency
+      // stamp: only the request that still sees the row's pre-read updated_at
+      // wins the claim: a racing second request finds 0 rows and is rejected
+      // before touching the wallet. refer_friend has no one-shot side effect
+      // here (see header comment) and stays re-invocable, so it's exempt.
+      if (outcomeType !== 'refer_friend') {
+        const { data: claimed } = await supabase
+          .from('player_cards')
+          .update({ updated_at: new Date().toISOString() })
+          .eq('id', card_id)
+          .eq('updated_at', card.updated_at)
+          .select('id')
+          .maybeSingle()
+        if (!claimed) {
+          return errorResponse('This I Bet Ya square was already processed. Please refresh and try again.', 409)
+        }
+      }
+
+      let updatedCompleted = parseJsonArr(card.completed_cells) as number[]
+      const purchased = parseJsonArr(card.purchased_cells) as number[]
+      const referral = parseJsonArr(card.referral_cells) as number[]
+
+      if (outcomeType === 'free_square') {
+        if (!updatedCompleted.includes(12)) updatedCompleted.push(12)
+
+      } else if (outcomeType === 'fund_credit') {
+        let { data: wallet } = await supabase.from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
+        if (!wallet) {
+          const { data: w } = await supabase.from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
+          wallet = w
+        }
+        const newBalance = parseFloat(wallet.balance) + actionValue
+        await supabase.from('player_wallets').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', user.sub)
+        await supabase.from('wallet_transactions').insert({
+          user_id: user.sub, amount: actionValue, transaction_type: 'bet_reward',
+          item_description: `I Bet Ya! reward (+$${actionValue.toFixed(2)})`,
+        })
+        result.new_balance = newBalance
+
+      } else if (outcomeType === 'remove_funds') {
+        let { data: wallet } = await supabase.from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
+        if (!wallet) {
+          const { data: w } = await supabase.from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
+          wallet = w
+        }
+        const currentBalance = parseFloat(wallet.balance)
+        const deduction = Math.min(actionValue, currentBalance)
+        const newBalance = currentBalance - deduction
+        if (deduction > 0) {
+          await supabase.from('player_wallets').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', user.sub)
+          await supabase.from('wallet_transactions').insert({
+            user_id: user.sub, amount: -deduction, transaction_type: 'bet_penalty',
+            item_description: `I Bet Ya! penalty (-$${deduction.toFixed(2)})`,
+          })
+        }
+        result.new_balance = newBalance
+        result.amount = deduction
+
+      } else if (outcomeType === 'refer_friend') {
+        result.prompt_referral = true
+
+      } else if (outcomeType === 'replace_three') {
+        const allMarked = new Set([...updatedCompleted, ...purchased, ...referral])
+        const eligibleCells = cells.filter(
+          (c) => c.index !== 12 && !c.is_free_space && !c.is_purchasable && !c.is_referral_free && !c.is_secret && !allMarked.has(c.index)
+        )
+        // Fisher-Yates shuffle with crypto RNG
+        for (let i = eligibleCells.length - 1; i > 0; i--) {
+          const buf = new Uint32Array(1); crypto.getRandomValues(buf)
+          const j = Math.floor((buf[0] / 4_294_967_296) * (i + 1));
+          [eligibleCells[i], eligibleCells[j]] = [eligibleCells[j], eligibleCells[i]]
+        }
+        const toReplace = eligibleCells.slice(0, 3)
+
+        if (toReplace.length === 0) {
+          result.replaced = []
+        } else {
+          const existingDeedIds = new Set(cells.map((c) => c.deed_id).filter((id): id is number => id != null))
+          const levelState = await getPlayerLevelState(supabase, user.sub)
+          const { data: allDeeds } = await supabase.from('good_deeds').select('*').eq('is_active', true)
+          const { playerValueIds, deedTargetingMap } = await fetchTargetingData(supabase, user.sub)
+          const basePool = (allDeeds ?? []).filter((d) => !existingDeedIds.has(d.id))
+          const levelPool = basePool.filter((d) => (d.complexity ?? 1) <= levelState.selected)
+          const sizedPool = levelPool.length >= toReplace.length ? levelPool : basePool
+          // targetedPool is a mutable copy we splice from to avoid duplicate picks
+          const targetedPool = [...filterDeedsByTargeting(sizedPool, playerValueIds, deedTargetingMap, sizedPool)]
+          const replaced: { index: number; old_deed: string; new_deed: string }[] = []
+          for (const targetCell of toReplace) {
+            if (targetedPool.length === 0) break
+            const buf = new Uint32Array(1); crypto.getRandomValues(buf)
+            const pick = Math.floor((buf[0] / 4_294_967_296) * targetedPool.length)
+            const newDeed = targetedPool.splice(pick, 1)[0]
+            existingDeedIds.add(newDeed.id)
+            cells[targetCell.index] = {
+              ...targetCell,
+              deed_text: newDeed.deed_text,
+              deed_text_long: newDeed.deed_text_long ?? null,
+              deed_id: newDeed.id,
+              quantity: newDeed.quantity ?? 1,
+              category: newDeed.category ?? null,
+              // Defense in depth: the eligible-cell filter above already
+              // excludes is_secret cells, but never let a secret badge or
+              // reward silently carry over onto an unrelated new deed.
+              is_secret: false,
+              secret_reward: null,
+              secret_revealed: false,
+            }
+            replaced.push({ index: targetCell.index, old_deed: targetCell.deed_text, new_deed: newDeed.deed_text })
+          }
+          result.replaced = replaced
+        }
+      }
+      // 'nothing': no side effect
+
+      // Mark revealed on the center cell — except refer_friend, which stays
+      // pending/retryable (identical to the no-match case in
+      // /bet-ya-refer-friend) until a submitted email actually matches and
+      // credits the reward. Setting bet_ya_revealed here unconditionally
+      // would permanently disable the centre square client-side the moment
+      // the player closes the modal, before they ever get to submit an
+      // email — locking them out of a reward they haven't had a chance to
+      // claim yet.
+      cells[12] = outcomeType === 'refer_friend' ? centerCell : { ...centerCell, bet_ya_revealed: true }
+
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
+      const isBingo = checkBingo(allCompleted, card.win_condition)
+
+      await supabase.from('player_cards').update({
+        card_data: JSON.stringify(cells),
+        completed_cells: JSON.stringify(updatedCompleted),
+        is_bingo: isBingo,
+        updated_at: new Date().toISOString(),
+      }).eq('id', card_id)
+
+      // First time this card reaches Bingo (any win_condition — one_line, two_lines,
+      // etc. are already evaluated as a single card-level threshold by checkBingo,
+      // so this one award covers every line satisfied by the reveal): award bingo
+      // bonus + congratulate by email + check for a level-up, same as mark-cell.
+      const revealLevelUp = await awardBingoIfNewlyWon(supabase, {
+        playerId: user.sub, cardId: card_id, weekYear: card.week_year, winCondition: card.win_condition,
+        wasAlreadyBingo: card.is_bingo, isBingoNow: isBingo,
+        userEmail: user.email, userName: user.name as string | undefined,
+      })
+
+      result.is_bingo = isBingo
+      result.completed_cells = updatedCompleted
+      if (isBingo && !card.is_bingo) result.draw_entered = true
+      if (revealLevelUp?.leveled_up) result.level_up = { previous_level: revealLevelUp.previous_level, new_level: revealLevelUp.new_level }
+      return jsonResponse(result)
+    }
+
+    // ── POST /bet-ya-refer-friend ─────────────────────────────────────────────
+    // Player submits an email at the "refer_friend" center square. Matches
+    // against an already-validated referral (friend registered with this
+    // email, referred by the current player) that hasn't been paid out via
+    // this flow before. No match / already-credited: no state change, the
+    // player can retry with a different email indefinitely.
+    if (method === 'POST' && path === '/bet-ya-refer-friend') {
+      const user = requireAuth(authUser)
+      const body = await req.json()
+      const { card_id } = body as { card_id: number }
+      const email = String(body.email ?? '').trim().toLowerCase()
+      if (!email) return errorResponse('Email is required', 400)
+      if (user.email && user.email.toLowerCase() === email) {
+        return errorResponse('You cannot refer yourself', 400)
+      }
+
+      const { data: card } = await supabase
+        .from('player_cards').select('*').eq('id', card_id).eq('user_id', user.sub).maybeSingle()
+      if (!card) return errorResponse('Card not found', 404)
+
+      const cells: Cell[] = JSON.parse(card.card_data)
+      const centerCell = cells[12]
+      if (centerCell?.bet_ya_outcome_type !== 'refer_friend') {
+        return errorResponse('This card\'s centre square is not a refer-a-friend outcome', 400)
+      }
+      const completed = parseJsonArr(card.completed_cells) as number[]
+      if (completed.includes(12)) {
+        return errorResponse('Centre square already completed', 400)
+      }
+
+      const { data: referralMatch } = await supabase
+        .from('referrals')
+        .select('id')
+        .eq('user_id', user.sub)
+        .eq('referred_email', email)
+        .eq('is_validated', true)
+        .is('bet_ya_credited_at', null)
+        .maybeSingle()
+
+      if (!referralMatch) {
+        // No validated, not-yet-credited referral for this email — no state change.
+        return jsonResponse({ matched: false, message: 'No matching referral found for that email yet. You can try again anytime.' })
+      }
+
+      // Atomically claim the centre square before paying out anything, so two
+      // concurrent claims against two DIFFERENT valid referrals can't both
+      // credit the wallet for a square that's only supposed to complete once.
+      // Same optimistic-concurrency pattern as /bet-ya-reveal: only the
+      // request that still sees the row's pre-read updated_at wins the claim;
+      // a losing concurrent request is rejected here, before it ever stamps a
+      // referral or touches the wallet.
+      const { data: claimed } = await supabase
+        .from('player_cards')
+        .update({ updated_at: new Date().toISOString() })
+        .eq('id', card_id)
+        .eq('updated_at', card.updated_at)
+        .select('id')
+        .maybeSingle()
+      if (!claimed) {
+        return errorResponse('This centre square was already completed. Please refresh and try again.', 409)
+      }
+
+      // Stamp the referral row so a future retry/race can't double-pay it.
+      await supabase.from('referrals').update({ bet_ya_credited_at: new Date().toISOString() }).eq('id', referralMatch.id)
+
+      const rewardAmount = Number(centerCell.bet_ya_action_value ?? 0)
+      let { data: wallet } = await supabase.from('player_wallets').select('*').eq('user_id', user.sub).maybeSingle()
+      if (!wallet) {
+        const { data: w } = await supabase.from('player_wallets').insert({ user_id: user.sub, balance: 0 }).select().single()
+        wallet = w
+      }
+      const newBalance = parseFloat(wallet.balance) + rewardAmount
+      await supabase.from('player_wallets').update({ balance: newBalance, updated_at: new Date().toISOString() }).eq('user_id', user.sub)
+      await supabase.from('wallet_transactions').insert({
+        user_id: user.sub, amount: rewardAmount, transaction_type: 'bet_referral_reward',
+        item_description: `I Bet Ya! Friend Referred reward (+$${rewardAmount.toFixed(2)})`,
+      })
+
+      cells[12] = { ...centerCell, bet_ya_label: 'Friend Referred', bet_ya_revealed: true }
+      const updatedCompleted = [...completed, 12]
+      const purchased = parseJsonArr(card.purchased_cells) as number[]
+      const referral = parseJsonArr(card.referral_cells) as number[]
+      const allCompleted = [...new Set([...updatedCompleted, ...purchased, ...referral, ...freeSpaceIndices(cells)])]
+      const isBingo = checkBingo(allCompleted, card.win_condition)
+
+      await supabase.from('player_cards').update({
+        card_data: JSON.stringify(cells),
+        completed_cells: JSON.stringify(updatedCompleted),
+        is_bingo: isBingo,
+        updated_at: new Date().toISOString(),
+      }).eq('id', card_id)
+
+      const result: Record<string, unknown> = {
+        matched: true, label: 'Friend Referred', amount: rewardAmount, new_balance: newBalance,
+        completed_cells: updatedCompleted, is_bingo: isBingo,
+      }
+
+      const referLevelUp = await awardBingoIfNewlyWon(supabase, {
+        playerId: user.sub, cardId: card_id, weekYear: card.week_year, winCondition: card.win_condition,
+        wasAlreadyBingo: card.is_bingo, isBingoNow: isBingo,
+        userEmail: user.email, userName: user.name as string | undefined,
+      })
+      if (isBingo && !card.is_bingo) result.draw_entered = true
+      if (referLevelUp?.leveled_up) result.level_up = { previous_level: referLevelUp.previous_level, new_level: referLevelUp.new_level }
+
+      return jsonResponse(result)
+    }
+
+    // ── GET /admin/bet-ya-outcomes ────────────────────────────────────────────
+    if (method === 'GET' && path === '/admin/bet-ya-outcomes') {
+      requireAdmin(authUser)
+      const { data } = await supabase.from('bet_ya_outcomes').select('*').order('id')
+      return jsonResponse({ outcomes: data ?? [] })
+    }
+
+    // Server-side guard mirroring the admin UI's 100% gate: sums the *active*
+    // odds_percent across all rows, substituting in a pending add/edit before
+    // persisting, so a bad request can never leave the table off 100%.
+    async function assertActiveOddsSumTo100(
+      excludeId: number | null,
+      pendingIsActive: boolean,
+      pendingPercent: number,
+    ): Promise<string | null> {
+      const { data: rows } = await supabase.from('bet_ya_outcomes').select('id, odds_percent, is_active')
+      let total = (rows ?? [])
+        .filter((r) => r.id !== excludeId && r.is_active)
+        .reduce((s, r) => s + Number(r.odds_percent), 0)
+      if (pendingIsActive) total += pendingPercent
+      if (Math.abs(total - 100) > 0.01) {
+        return `Active outcome percentages must sum to exactly 100% (currently ${total.toFixed(2)}%)`
+      }
+      return null
+    }
+
+    // ── POST /admin/bet-ya-outcomes ───────────────────────────────────────────
+    if (method === 'POST' && path === '/admin/bet-ya-outcomes') {
+      requireAdmin(authUser)
+      const body = await req.json()
+      const VALID_TYPES = ['free_square','refer_friend','fund_credit','remove_funds','replace_three','nothing']
+      if (!VALID_TYPES.includes(body.action_type)) return errorResponse('Invalid action_type', 400)
+      const oddsPercent = Number(body.odds_percent ?? 0)
+      const isActive = body.is_active !== false
+      const sumErr = await assertActiveOddsSumTo100(null, isActive, oddsPercent)
+      if (sumErr) return errorResponse(sumErr, 400)
+      const { data, error } = await supabase.from('bet_ya_outcomes').insert({
+        label: String(body.label ?? '').trim(),
+        odds_percent: oddsPercent,
+        action_type: body.action_type,
+        credit_amount: Number(body.credit_amount ?? 0),
+        remove_amount: Number(body.remove_amount ?? 0),
+        reward_amount: Number(body.reward_amount ?? 5),
+        is_active: isActive,
+        updated_at: new Date().toISOString(),
+      }).select().single()
+      if (error) return errorResponse(error.message, 400)
+      return jsonResponse({ outcome: data })
+    }
+
+    // ── PUT /admin/bet-ya-outcomes/:id ────────────────────────────────────────
+    const betYaUpdateMatch = method === 'PUT' && path.match(/^\/admin\/bet-ya-outcomes\/(\d+)$/)
+    if (betYaUpdateMatch) {
+      requireAdmin(authUser)
+      const id = parseInt(betYaUpdateMatch[1])
+      const body = await req.json()
+      const { data: existingRow } = await supabase.from('bet_ya_outcomes').select('*').eq('id', id).maybeSingle()
+      if (!existingRow) return errorResponse('Outcome not found', 404)
+      const updates: Record<string, unknown> = { updated_at: new Date().toISOString() }
+      if (body.label != null) updates.label = String(body.label).trim()
+      if (body.odds_percent != null) updates.odds_percent = Number(body.odds_percent)
+      if (body.credit_amount != null) updates.credit_amount = Number(body.credit_amount)
+      if (body.remove_amount != null) updates.remove_amount = Number(body.remove_amount)
+      if (body.reward_amount != null) updates.reward_amount = Number(body.reward_amount)
+      if (body.is_active != null) updates.is_active = Boolean(body.is_active)
+      const VALID_TYPES = ['free_square','refer_friend','fund_credit','remove_funds','replace_three','nothing']
+      if (body.action_type != null) {
+        if (!VALID_TYPES.includes(body.action_type)) return errorResponse('Invalid action_type', 400)
+        updates.action_type = body.action_type
+      }
+      const pendingPercent = (updates.odds_percent as number | undefined) ?? Number(existingRow.odds_percent)
+      const pendingIsActive = (updates.is_active as boolean | undefined) ?? Boolean(existingRow.is_active)
+      const sumErr = await assertActiveOddsSumTo100(id, pendingIsActive, pendingPercent)
+      if (sumErr) return errorResponse(sumErr, 400)
+      const { data, error } = await supabase.from('bet_ya_outcomes').update(updates).eq('id', id).select().single()
+      if (error) return errorResponse(error.message, 400)
+      return jsonResponse({ outcome: data })
+    }
+
+    // ── DELETE /admin/bet-ya-outcomes/:id ─────────────────────────────────────
+    const betYaDeleteMatch = method === 'DELETE' && path.match(/^\/admin\/bet-ya-outcomes\/(\d+)$/)
+    if (betYaDeleteMatch) {
+      requireAdmin(authUser)
+      const id = parseInt(betYaDeleteMatch[1])
+      const { data: existingRow } = await supabase.from('bet_ya_outcomes').select('is_active').eq('id', id).maybeSingle()
+      if (!existingRow) return errorResponse('Outcome not found', 404)
+      // Only an active row's removal can break the 100% invariant — deleting
+      // an already-inactive row never changes the active total.
+      if (existingRow.is_active) {
+        const sumErr = await assertActiveOddsSumTo100(id, false, 0)
+        if (sumErr) return errorResponse(sumErr, 400)
+      }
+      await supabase.from('bet_ya_outcomes').delete().eq('id', id)
       return jsonResponse({ success: true })
     }
 
