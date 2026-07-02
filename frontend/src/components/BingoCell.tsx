@@ -22,6 +22,7 @@ interface BingoCellProps {
   onUnmark?: (index: number) => void;
   onDare?: (index: number) => void;
   dareUsed?: boolean;
+  winCondition?: string;
 }
 
 const BingoCell: React.FC<BingoCellProps> = ({
@@ -38,6 +39,7 @@ const BingoCell: React.FC<BingoCellProps> = ({
   onUnmark,
   onDare,
   dareUsed = false,
+  winCondition,
 }) => {
   const [pendingConfirm, setPendingConfirm] = useState(false);
   const [pendingPurchase, setPendingPurchase] = useState(false);
@@ -93,7 +95,12 @@ const BingoCell: React.FC<BingoCellProps> = ({
     setPendingPurchase(false);
   };
 
-  const isCentreSquare = cell.index === 12 && cell.is_free_space;
+  // Fill the Card (blackout) mode never rolls an I Bet Ya outcome onto the
+  // centre cell (see supabase/functions/game/index.ts card generation) — it's
+  // left as a plain free space there. The outcome itself is hidden from the
+  // client until revealed, so win_condition (never secret) is what we gate
+  // on here, not cell.bet_ya_outcome_type.
+  const isCentreSquare = cell.index === 12 && cell.is_free_space && winCondition !== 'fill_card';
 
   const handleClick = () => {
     if (locked) return;

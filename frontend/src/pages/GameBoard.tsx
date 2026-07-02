@@ -8,7 +8,7 @@ import {
   WalletData,
   PendingDeed,
   MyTeamData,
-  DareSpinResult,
+  BetYaRevealResult,
   PlayerBadge,
   generateCard,
   markCell,
@@ -22,7 +22,8 @@ import {
   resetCard,
   getMyTeam,
   getMyTrades,
-  spinDare,
+  revealBetYa,
+  submitBetYaReferFriend,
   getMyProfile,
   getMyStreak,
   QuickTapDeed,
@@ -98,8 +99,8 @@ const GameBoard: React.FC = () => {
   const [playerNumber, setPlayerNumber] = useState<number | null>(null);
   const [playerBadge, setPlayerBadge] = useState<PlayerBadge | null>(null);
   const [myTeam, setMyTeam] = useState<MyTeamData | null>(null);
-  const [dareResult, setDareResult] = useState<DareSpinResult | null>(null);
-  const [dareSpinning, setDareSpinning] = useState(false);
+  const [betYaResult, setBetYaResult] = useState<BetYaRevealResult | null>(null);
+  const [betYaLoading, setBetYaLoading] = useState(false);
   const [pendingTradeCount, setPendingTradeCount] = useState(0);
   const [quickTapDeeds, setQuickTapDeeds] = useState<QuickTapDeed[]>([]);
   const [quickTapSource, setQuickTapSource] = useState<'custom' | 'default'>('default');
@@ -456,27 +457,35 @@ const GameBoard: React.FC = () => {
     }
   };
 
-  const handleDareSpin = async () => {
-    if (!card || dareSpinning) return;
-    setDareSpinning(true);
+  const handleBetYaReveal = async () => {
+    if (!card || betYaLoading) return;
+    setBetYaLoading(true);
     try {
-      const result = await spinDare(card.card_id);
-      setDareResult(result);
-      // Reflect wallet change immediately
+      const result = await revealBetYa(card.card_id);
+      setBetYaResult(result);
       if (typeof result.new_balance === 'number') {
         setWallet((prev) => prev ? { ...prev, balance: result.new_balance! } : prev);
       }
-      // Refresh card if a square was swapped or marked
-      if (result.outcome === 'swap_square' || result.outcome === 'mark_random') {
+      if (result.outcome === 'free_square' || result.outcome === 'replace_three') {
         await loadGame();
       }
-      // Update dare_clicks on the local card
-      setCard((prev) => prev ? { ...prev, dare_clicks: result.dare_clicks_used } : prev);
     } catch (err: any) {
-      toast.error(err?.message || 'Dare spin failed. Please try again.');
+      toast.error(err?.message || 'Could not reveal your dare. Please try again.');
     } finally {
-      setDareSpinning(false);
+      setBetYaLoading(false);
     }
+  };
+
+  const handleBetYaReferFriend = async (email: string) => {
+    if (!card) throw new Error('No active card');
+    const result = await submitBetYaReferFriend(card.card_id, email);
+    if (result.matched) {
+      if (typeof result.new_balance === 'number') {
+        setWallet((prev) => prev ? { ...prev, balance: result.new_balance! } : prev);
+      }
+      await loadGame();
+    }
+    return result;
   };
 
   const handleLogout = async () => {
@@ -919,8 +928,9 @@ const GameBoard: React.FC = () => {
                             setCellProgress((prev) => ({ ...prev, [idx]: p }))
                           }
                           onUnmark={handleUnmark}
-                          onDare={handleDareSpin}
-                          dareUsed={(card.dare_clicks ?? 0) >= 1}
+                          onDare={handleBetYaReveal}
+                          dareUsed={card.cells.find(c => c.index === 12)?.bet_ya_revealed === true}
+                          winCondition={card.win_condition}
                         />
                       </div>
                     </div>
@@ -1085,15 +1095,11 @@ const GameBoard: React.FC = () => {
         onNewGame={handleStartNewGame}
         newGameLoading={actionLoading}
       />
-      {dareResult && (
+      {betYaResult && (
         <DareModal
-          result={dareResult}
-          onClose={() => setDareResult(null)}
-          onReferralFlow={() => {
-            setDareResult(null);
-            // Scroll to referral section
-            document.getElementById('referral-section')?.scrollIntoView({ behavior: 'smooth' });
-          }}
+          result={betYaResult}
+          onClose={() => setBetYaResult(null)}
+          onSubmitReferralEmail={handleBetYaReferFriend}
         />
       )}
       {showEditProfile && (

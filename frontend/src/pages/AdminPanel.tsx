@@ -57,6 +57,12 @@ import {
   getAdminDeedTargetingBulk,
   getDeedTargeting,
   setDeedTargeting,
+  BetYaOutcome,
+  BetYaActionType,
+  adminGetBetYaOutcomes,
+  adminCreateBetYaOutcome,
+  adminUpdateBetYaOutcome,
+  adminDeleteBetYaOutcome,
 } from '@/lib/game-utils';
 import BingoCell from '@/components/BingoCell';
 import { Button } from '@/components/ui/button';
@@ -160,6 +166,29 @@ const AdminPanel: React.FC = () => {
   const [editMilestoneData, setEditMilestoneData] = useState({ days_required: '', label: '', message: '', display_order: '' });
   const [milestoneLoading, setMilestoneLoading] = useState(false);
 
+  // I Bet Ya outcomes state
+  const VALID_ACTION_TYPES: BetYaActionType[] = ['free_square','refer_friend','fund_credit','remove_funds','replace_three','nothing'];
+  const ACTION_TYPE_LABELS: Record<BetYaActionType, string> = {
+    free_square: 'Free Square', refer_friend: 'Refer a Friend',
+    fund_credit: 'Fund Credit', remove_funds: 'Remove Funds',
+    replace_three: 'Replace Three', nothing: 'Nothing',
+  };
+  const [betYaOutcomes, setBetYaOutcomes] = useState<BetYaOutcome[]>([]);
+  const [newBetYa, setNewBetYa] = useState({ label: '', odds_percent: '', action_type: 'nothing' as BetYaActionType, credit_amount: '0', remove_amount: '0', reward_amount: '5', is_active: true });
+  const [editingBetYaId, setEditingBetYaId] = useState<number | null>(null);
+  const [editBetYaData, setEditBetYaData] = useState({ label: '', odds_percent: '', action_type: 'nothing' as BetYaActionType, credit_amount: '0', remove_amount: '0', reward_amount: '5', is_active: true });
+  const [betYaLoading, setBetYaLoading] = useState(false);
+
+  // Predicts the active-odds total if a pending add/edit were saved, so the
+  // Save button can be gated on landing at exactly 100% (server enforces the
+  // same rule — this is just the UI-side mirror of it).
+  const predictBetYaActiveTotal = (excludeId: number | null, pendingIsActive: boolean, pendingPercent: number) => {
+    const base = betYaOutcomes
+      .filter(o => o.id !== excludeId && o.is_active)
+      .reduce((s, o) => s + Number(o.odds_percent), 0);
+    return pendingIsActive ? base + pendingPercent : base;
+  };
+
   // Teams state
   const [teams, setTeams] = useState<TeamItem[]>([]);
   const [newTeamName, setNewTeamName] = useState('');
@@ -221,6 +250,12 @@ const AdminPanel: React.FC = () => {
         const taRes = await getAdminTargetingAttributes();
         setTargetingAttributes(taRes.attributes || []);
       } catch { /* silent */ }
+
+      // Load I Bet Ya outcomes
+      try {
+        const byRes = await adminGetBetYaOutcomes();
+        setBetYaOutcomes(byRes.outcomes || []);
+      } catch { /* silent */ }
     } catch (err: any) {
       toast.error('Failed to load admin data');
     }
@@ -251,6 +286,66 @@ const AdminPanel: React.FC = () => {
     } catch {
       // silent
     }
+  };
+
+  // ── I Bet Ya CRUD handlers ───────────────────────────────────────────────
+  const activeBetYaTotal = betYaOutcomes.filter(o => o.is_active).reduce((s, o) => s + Number(o.odds_percent), 0);
+
+  const handleAddBetYa = async () => {
+    const pct = parseFloat(newBetYa.odds_percent);
+    if (!newBetYa.label.trim() || isNaN(pct)) { toast.error('Label and odds % are required'); return; }
+    if (Math.abs(predictBetYaActiveTotal(null, newBetYa.is_active, pct) - 100) > 0.01) {
+      toast.error('Active outcome percentages must sum to exactly 100% to save');
+      return;
+    }
+    setBetYaLoading(true);
+    try {
+      const res = await adminCreateBetYaOutcome({
+        label: newBetYa.label.trim(), odds_percent: pct, action_type: newBetYa.action_type,
+        credit_amount: parseFloat(newBetYa.credit_amount) || 0,
+        remove_amount: parseFloat(newBetYa.remove_amount) || 0,
+        reward_amount: parseFloat(newBetYa.reward_amount) || 0,
+        is_active: newBetYa.is_active,
+      });
+      setBetYaOutcomes(prev => [...prev, res.outcome]);
+      setNewBetYa({ label: '', odds_percent: '', action_type: 'nothing', credit_amount: '0', remove_amount: '0', reward_amount: '5', is_active: true });
+      toast.success('Outcome added');
+    } catch (e: any) { toast.error(e?.message || 'Failed to add outcome'); }
+    finally { setBetYaLoading(false); }
+  };
+
+  const handleUpdateBetYa = async (id: number) => {
+    const pct = parseFloat(editBetYaData.odds_percent);
+    if (!editBetYaData.label.trim() || isNaN(pct)) { toast.error('Label and odds % are required'); return; }
+    if (Math.abs(predictBetYaActiveTotal(id, editBetYaData.is_active, pct) - 100) > 0.01) {
+      toast.error('Active outcome percentages must sum to exactly 100% to save');
+      return;
+    }
+    setBetYaLoading(true);
+    try {
+      const res = await adminUpdateBetYaOutcome(id, {
+        label: editBetYaData.label.trim(), odds_percent: pct, action_type: editBetYaData.action_type,
+        credit_amount: parseFloat(editBetYaData.credit_amount) || 0,
+        remove_amount: parseFloat(editBetYaData.remove_amount) || 0,
+        reward_amount: parseFloat(editBetYaData.reward_amount) || 0,
+        is_active: editBetYaData.is_active,
+      });
+      setBetYaOutcomes(prev => prev.map(o => o.id === id ? res.outcome : o));
+      setEditingBetYaId(null);
+      toast.success('Outcome updated');
+    } catch (e: any) { toast.error(e?.message || 'Failed to update outcome'); }
+    finally { setBetYaLoading(false); }
+  };
+
+  const handleDeleteBetYa = async (id: number) => {
+    if (!confirm('Delete this outcome?')) return;
+    setBetYaLoading(true);
+    try {
+      await adminDeleteBetYaOutcome(id);
+      setBetYaOutcomes(prev => prev.filter(o => o.id !== id));
+      toast.success('Outcome deleted');
+    } catch (e: any) { toast.error(e?.message || 'Failed to delete outcome'); }
+    finally { setBetYaLoading(false); }
   };
 
   const handleUpdateClaimStatus = async (id: number, status: string) => {
@@ -2596,6 +2691,184 @@ const AdminPanel: React.FC = () => {
             >
               {announceLoading ? 'Sending…' : 'Send Announcement to All Players'}
             </Button>
+          </CardContent>
+        </Card>
+        </section>
+
+        {/* I Bet Ya Outcomes */}
+        <section id="section-bet-ya">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Ticket className="w-5 h-5 text-amber-500" />
+              I Bet Ya! Outcomes
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-slate-500">
+              Configure the weighted outcomes for the centre square. Active outcomes must sum to exactly 100%.
+              The outcome is snapshotted at card generation — players reveal it by clicking the centre cell.
+            </p>
+
+            {/* Running total */}
+            <div className={`flex items-center gap-2 text-sm font-bold px-3 py-2 rounded-lg border ${Math.abs(activeBetYaTotal - 100) < 0.01 ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'bg-rose-50 border-rose-300 text-rose-700'}`}>
+              <span>Active total: {activeBetYaTotal.toFixed(2)}%</span>
+              {Math.abs(activeBetYaTotal - 100) < 0.01
+                ? <span className="text-emerald-500">✓ Sums to 100%</span>
+                : <span className="text-rose-500">⚠ Must sum to 100% before new cards are generated correctly</span>}
+            </div>
+
+            {/* Outcome list */}
+            <div className="space-y-2">
+              {betYaOutcomes.map(outcome => (
+                <div key={outcome.id} className={`border rounded-lg p-3 ${outcome.is_active ? 'border-slate-300 bg-white' : 'border-slate-200 bg-slate-50 opacity-60'}`}>
+                  {editingBetYaId === outcome.id ? (
+                    <div className="space-y-2">
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-xs text-slate-500 font-medium">Label</label>
+                          <Input value={editBetYaData.label} onChange={e => setEditBetYaData(d => ({ ...d, label: e.target.value }))} className="h-8 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 font-medium">Odds %</label>
+                          <Input type="number" min="0" max="100" step="0.01" value={editBetYaData.odds_percent} onChange={e => setEditBetYaData(d => ({ ...d, odds_percent: e.target.value }))} className="h-8 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-slate-500 font-medium">Action Type</label>
+                          <select value={editBetYaData.action_type} onChange={e => setEditBetYaData(d => ({ ...d, action_type: e.target.value as BetYaActionType, credit_amount: '0', remove_amount: '0', reward_amount: '5' }))} className="w-full border border-slate-300 rounded-md px-2 py-1 text-sm h-8">
+                            {VALID_ACTION_TYPES.map(t => <option key={t} value={t}>{ACTION_TYPE_LABELS[t]}</option>)}
+                          </select>
+                        </div>
+                        {editBetYaData.action_type === 'fund_credit' && (
+                          <div>
+                            <label className="text-xs text-slate-500 font-medium">Credit Amount ($)</label>
+                            <Input type="number" min="0" step="0.01" value={editBetYaData.credit_amount} onChange={e => setEditBetYaData(d => ({ ...d, credit_amount: e.target.value }))} className="h-8 text-sm" />
+                          </div>
+                        )}
+                        {editBetYaData.action_type === 'remove_funds' && (
+                          <div>
+                            <label className="text-xs text-slate-500 font-medium">Remove Amount ($)</label>
+                            <Input type="number" min="0" step="0.01" value={editBetYaData.remove_amount} onChange={e => setEditBetYaData(d => ({ ...d, remove_amount: e.target.value }))} className="h-8 text-sm" />
+                          </div>
+                        )}
+                        {editBetYaData.action_type === 'refer_friend' && (
+                          <div>
+                            <label className="text-xs text-slate-500 font-medium">Reward Amount ($)</label>
+                            <Input type="number" min="0" step="0.01" value={editBetYaData.reward_amount} onChange={e => setEditBetYaData(d => ({ ...d, reward_amount: e.target.value }))} className="h-8 text-sm" />
+                          </div>
+                        )}
+                      </div>
+                      <label className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={editBetYaData.is_active} onChange={e => setEditBetYaData(d => ({ ...d, is_active: e.target.checked }))} />
+                        Active
+                      </label>
+                      {Math.abs(predictBetYaActiveTotal(outcome.id, editBetYaData.is_active, parseFloat(editBetYaData.odds_percent) || 0) - 100) > 0.01 && (
+                        <p className="text-xs text-rose-600">Saving this would leave active outcomes at {predictBetYaActiveTotal(outcome.id, editBetYaData.is_active, parseFloat(editBetYaData.odds_percent) || 0).toFixed(2)}% — must be exactly 100%.</p>
+                      )}
+                      <div className="flex gap-2">
+                        <Button
+                          size="sm"
+                          onClick={() => handleUpdateBetYa(outcome.id)}
+                          disabled={betYaLoading || Math.abs(predictBetYaActiveTotal(outcome.id, editBetYaData.is_active, parseFloat(editBetYaData.odds_percent) || 0) - 100) > 0.01}
+                          className="bg-emerald-600 hover:bg-emerald-700 text-white"
+                        >
+                          Save
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => setEditingBetYaId(null)}>Cancel</Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-sm text-slate-800">{outcome.label}</span>
+                          <span className="text-xs bg-slate-100 border border-slate-200 rounded px-1.5 py-0.5 text-slate-600">{ACTION_TYPE_LABELS[outcome.action_type]}</span>
+                          {outcome.action_type === 'fund_credit' && outcome.credit_amount > 0 && (
+                            <span className="text-xs text-slate-500">${Number(outcome.credit_amount).toFixed(2)}</span>
+                          )}
+                          {outcome.action_type === 'remove_funds' && outcome.remove_amount > 0 && (
+                            <span className="text-xs text-slate-500">${Number(outcome.remove_amount).toFixed(2)}</span>
+                          )}
+                          {outcome.action_type === 'refer_friend' && outcome.reward_amount > 0 && (
+                            <span className="text-xs text-slate-500">${Number(outcome.reward_amount).toFixed(2)}</span>
+                          )}
+                        </div>
+                        <span className="text-sm font-bold text-amber-600">{Number(outcome.odds_percent).toFixed(2)}%</span>
+                      </div>
+                      <div className="flex gap-1 flex-shrink-0">
+                        <Button size="sm" variant="outline" onClick={() => {
+                          setEditingBetYaId(outcome.id);
+                          setEditBetYaData({
+                            label: outcome.label, odds_percent: String(outcome.odds_percent), action_type: outcome.action_type,
+                            credit_amount: String(outcome.credit_amount), remove_amount: String(outcome.remove_amount), reward_amount: String(outcome.reward_amount),
+                            is_active: outcome.is_active,
+                          });
+                        }}>
+                          <Edit2 className="w-3 h-3" />
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => handleDeleteBetYa(outcome.id)} className="text-rose-600 hover:text-rose-700">
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Add new outcome */}
+            <div className="border border-dashed border-slate-300 rounded-lg p-3 space-y-2">
+              <p className="text-xs font-bold text-slate-500 uppercase tracking-wider">Add Outcome</p>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-xs text-slate-500 font-medium">Label</label>
+                  <Input placeholder="e.g. Fund Credit!" value={newBetYa.label} onChange={e => setNewBetYa(d => ({ ...d, label: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium">Odds %</label>
+                  <Input type="number" min="0" max="100" step="0.01" placeholder="25" value={newBetYa.odds_percent} onChange={e => setNewBetYa(d => ({ ...d, odds_percent: e.target.value }))} className="h-8 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-500 font-medium">Action Type</label>
+                  <select value={newBetYa.action_type} onChange={e => setNewBetYa(d => ({ ...d, action_type: e.target.value as BetYaActionType, credit_amount: '0', remove_amount: '0', reward_amount: '5' }))} className="w-full border border-slate-300 rounded-md px-2 py-1 text-sm h-8">
+                    {VALID_ACTION_TYPES.map(t => <option key={t} value={t}>{ACTION_TYPE_LABELS[t]}</option>)}
+                  </select>
+                </div>
+                {newBetYa.action_type === 'fund_credit' && (
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium">Credit Amount ($)</label>
+                    <Input type="number" min="0" step="0.01" placeholder="0.00" value={newBetYa.credit_amount} onChange={e => setNewBetYa(d => ({ ...d, credit_amount: e.target.value }))} className="h-8 text-sm" />
+                  </div>
+                )}
+                {newBetYa.action_type === 'remove_funds' && (
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium">Remove Amount ($)</label>
+                    <Input type="number" min="0" step="0.01" placeholder="0.00" value={newBetYa.remove_amount} onChange={e => setNewBetYa(d => ({ ...d, remove_amount: e.target.value }))} className="h-8 text-sm" />
+                  </div>
+                )}
+                {newBetYa.action_type === 'refer_friend' && (
+                  <div>
+                    <label className="text-xs text-slate-500 font-medium">Reward Amount ($)</label>
+                    <Input type="number" min="0" step="0.01" placeholder="5.00" value={newBetYa.reward_amount} onChange={e => setNewBetYa(d => ({ ...d, reward_amount: e.target.value }))} className="h-8 text-sm" />
+                  </div>
+                )}
+              </div>
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={newBetYa.is_active} onChange={e => setNewBetYa(d => ({ ...d, is_active: e.target.checked }))} />
+                Active
+              </label>
+              {newBetYa.odds_percent && Math.abs(predictBetYaActiveTotal(null, newBetYa.is_active, parseFloat(newBetYa.odds_percent) || 0) - 100) > 0.01 && (
+                <p className="text-xs text-rose-600">Adding this would leave active outcomes at {predictBetYaActiveTotal(null, newBetYa.is_active, parseFloat(newBetYa.odds_percent) || 0).toFixed(2)}% — must be exactly 100%.</p>
+              )}
+              <Button
+                size="sm"
+                onClick={handleAddBetYa}
+                disabled={betYaLoading || !newBetYa.label.trim() || !newBetYa.odds_percent || Math.abs(predictBetYaActiveTotal(null, newBetYa.is_active, parseFloat(newBetYa.odds_percent) || 0) - 100) > 0.01}
+                className="bg-amber-600 hover:bg-amber-700 text-white"
+              >
+                <Plus className="w-3 h-3 mr-1" /> Add Outcome
+              </Button>
+            </div>
           </CardContent>
         </Card>
         </section>

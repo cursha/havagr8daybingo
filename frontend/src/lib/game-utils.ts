@@ -49,6 +49,11 @@ export interface CellData {
   secret_revealed?: boolean;
   quantity?: number;
   category?: string | null;
+  // I Bet Ya — present on center cell (index 12) in classic mode
+  bet_ya_outcome_type?: string | null;
+  bet_ya_label?: string | null;
+  bet_ya_action_value?: number | null;
+  bet_ya_revealed?: boolean;
 }
 
 export interface StreakMilestone {
@@ -104,27 +109,69 @@ export interface CardData {
   purchased_cells: number[];
   referral_cells: number[];
   is_bingo: boolean;
-  dare_clicks: number;
   draw_entered?: boolean;
 }
 
-export interface DareSpinResult {
-  outcome: 'add_funds' | 'remove_funds' | 'swap_square' | 'refer_player' | 'nothing';
+export type BetYaActionType = 'free_square' | 'refer_friend' | 'fund_credit' | 'remove_funds' | 'replace_three' | 'nothing';
+
+export interface BetYaOutcome {
+  id: number;
   label: string;
-  amount?: number;
-  new_balance?: number;
-  old_deed?: string;
-  new_deed?: string;
-  swapped_cell_index?: number;
-  completed_cells?: number[];
-  is_bingo?: boolean;
-  dare_clicks_used: number;
-  dare_clicks_remaining: number;
-  message?: string;
+  odds_percent: number;
+  action_type: BetYaActionType;
+  credit_amount: number;
+  remove_amount: number;
+  reward_amount: number;
+  is_active: boolean;
 }
 
-export async function spinDare(cardId: number): Promise<DareSpinResult> {
-  return apiClient.post<DareSpinResult>('/game/dare-spin', { card_id: cardId });
+export interface BetYaRevealResult {
+  outcome: BetYaActionType;
+  label: string;
+  amount: number;
+  new_balance?: number;
+  prompt_referral?: boolean;
+  replaced?: { index: number; old_deed: string; new_deed: string }[];
+  completed_cells: number[];
+  is_bingo: boolean;
+  draw_entered?: boolean;
+  level_up?: { previous_level: number; new_level: number };
+}
+
+export async function revealBetYa(cardId: number): Promise<BetYaRevealResult> {
+  return apiClient.post<BetYaRevealResult>('/game/bet-ya-reveal', { card_id: cardId });
+}
+
+export interface BetYaReferFriendResult {
+  matched: boolean;
+  message?: string;
+  label?: string;
+  amount?: number;
+  new_balance?: number;
+  completed_cells?: number[];
+  is_bingo?: boolean;
+  draw_entered?: boolean;
+  level_up?: { previous_level: number; new_level: number };
+}
+
+export async function submitBetYaReferFriend(cardId: number, email: string): Promise<BetYaReferFriendResult> {
+  return apiClient.post<BetYaReferFriendResult>('/game/bet-ya-refer-friend', { card_id: cardId, email });
+}
+
+export async function adminGetBetYaOutcomes(): Promise<{ outcomes: BetYaOutcome[] }> {
+  return apiClient.get('/game/admin/bet-ya-outcomes');
+}
+
+export async function adminCreateBetYaOutcome(data: Omit<BetYaOutcome, 'id'>): Promise<{ outcome: BetYaOutcome }> {
+  return apiClient.post('/game/admin/bet-ya-outcomes', data);
+}
+
+export async function adminUpdateBetYaOutcome(id: number, data: Partial<Omit<BetYaOutcome, 'id'>>): Promise<{ outcome: BetYaOutcome }> {
+  return apiClient.put(`/game/admin/bet-ya-outcomes/${id}`, data);
+}
+
+export async function adminDeleteBetYaOutcome(id: number): Promise<void> {
+  return apiClient.delete(`/game/admin/bet-ya-outcomes/${id}`);
 }
 
 export interface WinCondition {
